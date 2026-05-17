@@ -1,0 +1,14 @@
+[package]
+name = "forge-codegen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Forge → Askama preprocessor: parser, lowering, build.rs integration."
+
+[dependencies]
+chumsky = { workspace = true }
+walkdir = { workspace = true }
+indexmap = { workspace = true }
+regex = { workspace = true }
+thiserror = { workspace = true }

@@ -1,0 +1,23 @@
+[package]
+name = "anvil"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Anvil — Laravel-equivalent Rust web framework. Facade crate that re-exports everything users need."
+
+[dependencies]
+anvil-core = { workspace = true }
+anvil-derive = { workspace = true }
+cast = { workspace = true }
+forge = { workspace = true }
+reverb = { workspace = true }
+tokio = { workspace = true }
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+async-trait = { workspace = true }
+sqlx = { workspace = true }

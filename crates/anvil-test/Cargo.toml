@@ -1,0 +1,25 @@
+[package]
+name = "anvil-test"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Anvil test utilities: HTTP test client, factories, fakes for mail/queue/notification."
+
+[dependencies]
+anvil-core = { workspace = true }
+tokio = { workspace = true }
+axum = { workspace = true }
+tower = { workspace = true }
+hyper = { workspace = true }
+http = { workspace = true }
+http-body-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+fake = { workspace = true }
+parking_lot = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+bytes = { workspace = true }

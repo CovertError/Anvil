@@ -1,0 +1,27 @@
+[package]
+name = "smith"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Smith — Anvil's CLI (Artisan equivalent). Scaffolding, migrations, serve, queue:work, schedule:run, test."
+
+[[bin]]
+name = "smith"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true }
+handlebars = { workspace = true }
+inquire = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+walkdir = { workspace = true }
+notify = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+chrono = { workspace = true }
+regex = { workspace = true }

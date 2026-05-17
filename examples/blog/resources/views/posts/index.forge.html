@@ -1,0 +1,25 @@
+@extends("layouts.app")
+
+@section("content")
+<h2>Posts</h2>
+<ul>
+    @foreach(posts as post)
+        <li>
+            <a href="/posts/{{ post.id }}">{{ post.title }}</a>
+            @if(post.published)
+                <span class="badge">published</span>
+            @else
+                <span class="badge muted">draft</span>
+            @endif
+        </li>
+    @endforeach
+</ul>
+
+<x-alert type="info">
+    Showing {{ posts.len() }} posts.
+</x-alert>
+
+@push("scripts")
+    <script>console.log("posts page loaded");</script>
+@endpush
+@endsection

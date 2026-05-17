@@ -2,6 +2,19 @@
 <module type="EMPTY_MODULE" version="4">
   <component name="NewModuleRootManager">
     <content url="file://$MODULE_DIR$">
+      <sourceFolder url="file://$MODULE_DIR$/crates/anvil-core/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/anvil-derive/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/anvil-test/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/anvil/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/cast-core/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/cast-derive/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/cast/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/forge-codegen/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/forge/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/reverb/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/smith/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/examples/blog/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/examples/blog/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>

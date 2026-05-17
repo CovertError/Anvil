@@ -1,0 +1,16 @@
+[package]
+name = "anvil-derive"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Proc macros for Anvil: FormRequest, Job, Event, Listener, Authenticatable, Notification, controller routing."
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { workspace = true }
+quote = { workspace = true }
+proc-macro2 = { workspace = true }
+darling = { workspace = true }

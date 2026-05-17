@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }} — Anvil POC</title>
+    @vite(["resources/css/app.css", "resources/js/app.js"])
+    @stack("head")
+</head>
+<body>
+    <header><h1><a href="/">Anvil POC blog</a></h1></header>
+    <main>
+        @yield("content")
+    </main>
+    <footer>
+        @if(footer_visible)
+            <p>powered by Anvil</p>
+        @endif
+    </footer>
+    @stack("scripts")
+</body>
+</html>
