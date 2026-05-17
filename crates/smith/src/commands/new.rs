@@ -108,10 +108,9 @@ fn create_directories(root: &Path) -> Result<()> {
 }
 
 fn write_root_files(root: &Path, name: &str) -> Result<()> {
-    let anvil_dep = internal_dep_spec("anvil")?;
-    let cast_dep = internal_dep_spec("cast")?;
-    let anvil_core_dep = internal_dep_spec("anvil-core")?;
-    let anvil_test_dep = internal_dep_spec("anvil-test")?;
+    // The facade re-exports everything users need; one direct dep is enough.
+    let anvilforge_dep = internal_dep_spec("anvil")?;
+    let anvilforge_test_dep = internal_dep_spec("anvil-test")?;
 
     write(
         root,
@@ -130,25 +129,21 @@ path = "src/main.rs"
 path = "src/lib.rs"
 
 [dependencies]
-anvil = {anvil_dep}
-anvil-core = {anvil_core_dep}
-cast = {cast_dep}
+anvilforge = {anvilforge_dep}
 tokio = {{ version = "1", features = ["full"] }}
-axum = {{ version = "0.7", features = ["macros"] }}
 serde = {{ version = "1", features = ["derive"] }}
 serde_json = "1"
-sqlx = {{ version = "0.8", features = ["runtime-tokio-rustls", "postgres", "macros", "chrono", "uuid"] }}
+sqlx = {{ version = "0.8", features = ["runtime-tokio-rustls", "postgres"] }}
 async-trait = "0.1"
 thiserror = "1"
 anyhow = "1"
 chrono = {{ version = "0.4", features = ["serde"] }}
 uuid = {{ version = "1", features = ["v4", "serde"] }}
 tracing = "0.1"
-tracing-subscriber = {{ version = "0.3", features = ["env-filter", "fmt"] }}
 garde = {{ version = "0.20", features = ["full"] }}
 
 [dev-dependencies]
-anvil-test = {anvil_test_dep}
+anvilforge-test = {anvilforge_test_dep}
 "#,
         ),
     )?;
@@ -333,17 +328,17 @@ pub mod routes;
 
 use std::net::SocketAddr;
 
-use anvil::prelude::*;
-use anvil_core::cache::CacheStore;
-use anvil_core::container::ContainerBuilder;
+use anvilforge::prelude::*;
+use anvilforge::cache::CacheStore;
+use anvilforge::container::ContainerBuilder;
 use anyhow::Result;
 
 use {crate_name}::{{app, bootstrap, database}};
 
 #[tokio::main]
 async fn main() -> Result<()> {{
-    anvil_core::config::load_dotenv();
-    anvil_core::tracing_init::init();
+    anvilforge::config::load_dotenv();
+    anvilforge::tracing_init::init();
 
     let args: Vec<String> = std::env::args().collect();
     let subcommand = args.get(1).map(String::as_str).unwrap_or("serve");
@@ -364,8 +359,8 @@ async fn main() -> Result<()> {{
 }}
 
 async fn build_pool() -> Result<sqlx::PgPool> {{
-    let cfg = anvil_core::config::DatabaseConfig::from_env();
-    let pool = cast::connect(&cfg.url, cfg.pool_size).await?;
+    let cfg = anvilforge::config::DatabaseConfig::from_env();
+    let pool = anvilforge::cast::connect(&cfg.url, cfg.pool_size).await?;
     Ok(pool)
 }}
 
@@ -391,7 +386,7 @@ async fn serve() -> Result<()> {{
 
 async fn run_migrate() -> Result<()> {{
     let pool = build_pool().await?;
-    let runner = cast::MigrationRunner::with_migrations(pool, database::migrations::all());
+    let runner = anvilforge::cast::MigrationRunner::with_migrations(pool, database::migrations::all());
     let applied = runner.run_up().await?;
     if applied.is_empty() {{
         println!("nothing to migrate");
@@ -405,7 +400,7 @@ async fn run_migrate() -> Result<()> {{
 
 async fn run_migrate_rollback() -> Result<()> {{
     let pool = build_pool().await?;
-    let runner = cast::MigrationRunner::with_migrations(pool, database::migrations::all());
+    let runner = anvilforge::cast::MigrationRunner::with_migrations(pool, database::migrations::all());
     let rolled = runner.rollback().await?;
     for name in rolled {{
         println!("rolled back: {{name}}");
@@ -415,7 +410,7 @@ async fn run_migrate_rollback() -> Result<()> {{
 
 async fn run_migrate_fresh() -> Result<()> {{
     let pool = build_pool().await?;
-    let runner = cast::MigrationRunner::with_migrations(pool, database::migrations::all());
+    let runner = anvilforge::cast::MigrationRunner::with_migrations(pool, database::migrations::all());
     runner.fresh().await?;
     println!("fresh migrations complete");
     Ok(())
@@ -430,8 +425,8 @@ async fn run_seed() -> Result<()> {{
 
 async fn run_queue_worker() -> Result<()> {{
     let container = build_container().await?;
-    let shutdown = anvil_core::shutdown::ShutdownHandle::new().install();
-    anvil_core::queue::run_worker(container, "default".into(), shutdown).await?;
+    let shutdown = anvilforge::shutdown::ShutdownHandle::new().install();
+    anvilforge::queue::run_worker(container, "default".into(), shutdown).await?;
     Ok(())
 }}
 
@@ -467,7 +462,7 @@ pub mod seeders;
         "src/app/models.rs",
         r#"//! Cast models. Add new models here (or run `smith make:model Foo`).
 
-use anvil::prelude::*;
+use anvilforge::prelude::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Model)]
 #[table("users")]
@@ -489,7 +484,7 @@ pub struct User {
 
 // Example:
 //
-//   use anvil_core::auth::Policy;
+//   use anvilforge::auth::Policy;
 //   use crate::app::models::User;
 //
 //   pub struct UserPolicy;
@@ -512,7 +507,7 @@ pub struct User {
 
 // Example:
 //
-//   use anvil::prelude::*;
+//   use anvilforge::prelude::*;
 //   use garde::Validate;
 //
 //   #[derive(Debug, Deserialize, Validate, FormRequest)]
@@ -534,7 +529,7 @@ pub struct User {
         "src/app/schedule.rs",
         r#"//! Scheduler entries — called via `smith schedule:run`.
 
-use anvil_core::schedule::Schedule;
+use anvilforge::schedule::Schedule;
 
 pub fn build() -> Schedule {
     Schedule::new()
@@ -550,7 +545,7 @@ pub fn build() -> Schedule {
         "src/app/seeders.rs",
         r#"//! Database seeders — populate development data.
 
-use anvil::prelude::*;
+use anvilforge::prelude::*;
 
 pub async fn run_all(_container: &Container) -> anyhow::Result<()> {
     tracing::info!("no seeders defined yet");
@@ -575,8 +570,8 @@ fn write_bootstrap_files(root: &Path) -> Result<()> {
         "src/bootstrap/app.rs",
         r#"//! Application bootstrap — wires container, middleware, routes.
 
-use anvil::prelude::*;
-use anvil_core::Application;
+use anvilforge::prelude::*;
+use anvilforge::Application;
 
 use crate::routes;
 
@@ -584,7 +579,7 @@ pub async fn build(container: Container) -> anyhow::Result<Application> {
     let pool = container.pool().clone();
     let app = Application::builder()
         .container(|_b| {
-            anvil_core::container::ContainerBuilder::from_env().pool(pool.clone())
+            anvilforge::container::ContainerBuilder::from_env().pool(pool.clone())
         })
         .web(routes::web::register)
         .api(routes::api::register)
@@ -611,7 +606,7 @@ pub mod web;
         "src/routes/web.rs",
         r##"//! Web routes — HTML responses.
 
-use anvil::prelude::*;
+use anvilforge::prelude::*;
 
 pub fn register(r: Router) -> Router {
     r.get("/", home).get("/health", health)
@@ -656,7 +651,7 @@ async fn health() -> &'static str {
         "src/routes/api.rs",
         r#"//! API routes — JSON responses.
 
-use anvil::prelude::*;
+use anvilforge::prelude::*;
 
 pub fn register(r: Router) -> Router {
     r.get("/ping", ping)
@@ -677,7 +672,7 @@ fn write_config_files(root: &Path) -> Result<()> {
         "src/config/mod.rs",
         r#"//! Typed config modules. Each returns a struct loaded from environment.
 //!
-//! Anvil's defaults (in `anvil_core::config`) cover the common cases. Override
+//! Anvil's defaults (in `anvilforge::config`) cover the common cases. Override
 //! per-app config here.
 "#,
     )?;
@@ -700,8 +695,8 @@ fn write_database_files(root: &Path) -> Result<()> {
 //!
 //! Run with `smith migrate` / `smith migrate:rollback` / `smith migrate:fresh`.
 
-use anvil::prelude::*;
-use cast::Schema;
+use anvilforge::prelude::*;
+use anvilforge::cast::Schema;
 
 pub struct CreateUsersTable;
 
@@ -892,20 +887,23 @@ fn write(root: &Path, rel: &str, content: &str) -> Result<()> {
     Ok(())
 }
 
-/// Return the dependency spec for an internal Anvil crate (`anvil`, `cast`, etc.).
+/// Return the dependency spec for an internal Anvilforge crate.
 ///
 /// Resolution order:
-/// 1. `ANVIL_PATH` env var (explicit override)
-/// 2. Walk up from cwd looking for the Anvil workspace
+/// 1. `ANVILFORGE_PATH` env var (explicit override)
+/// 2. Walk up from cwd looking for the Anvilforge workspace
 /// 3. The workspace root embedded at build time (works for `cargo install --path crates/smith`)
 /// 4. Fall back to a `version = "..."` crates.io spec
-fn internal_dep_spec(crate_name: &str) -> Result<String> {
-    let crate_path = format!("crates/{crate_name}");
+///
+/// `crate_dir_name` is the workspace directory name (`anvil`, `cast`, `forge`, etc.).
+/// The published crate name is different (`anvilforge`, `anvilforge-cast`, etc.).
+fn internal_dep_spec(crate_dir_name: &str) -> Result<String> {
+    let crate_path = format!("crates/{crate_dir_name}");
 
-    if let Ok(path) = std::env::var("ANVIL_PATH") {
+    if let Ok(path) = std::env::var("ANVILFORGE_PATH").or_else(|_| std::env::var("ANVIL_PATH")) {
         return Ok(format!(r#"{{ path = "{path}/{crate_path}" }}"#));
     }
-    if let Some(workspace_root) = find_anvil_workspace() {
+    if let Some(workspace_root) = find_anvilforge_workspace() {
         return Ok(format!(
             r#"{{ path = "{}" }}"#,
             workspace_root.join(&crate_path).display()
@@ -921,13 +919,13 @@ fn internal_dep_spec(crate_name: &str) -> Result<String> {
     Ok(r#"{ version = "0.1" }"#.to_string())
 }
 
-fn find_anvil_workspace() -> Option<PathBuf> {
+fn find_anvilforge_workspace() -> Option<PathBuf> {
     let mut dir = std::env::current_dir().ok()?;
     loop {
         let cargo = dir.join("Cargo.toml");
         if cargo.exists() {
             if let Ok(content) = std::fs::read_to_string(&cargo) {
-                if content.contains("[workspace]") && content.contains("crates/anvil") {
+                if content.contains("[workspace]") && content.contains("anvilforge") {
                     return Some(dir);
                 }
             }

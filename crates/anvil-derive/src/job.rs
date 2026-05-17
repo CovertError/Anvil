@@ -11,36 +11,36 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
 
     Ok(quote! {
         impl #name {
-            pub async fn dispatch(self) -> ::anvil_core::Result<()> {
-                let container = ::anvil_core::container::current();
-                let data = ::anvil_core::serde_json::to_value(&self)
-                    .map_err(|e| ::anvil_core::Error::Internal(e.to_string()))?;
-                ::anvil_core::queue::dispatch_payload(&container, #name_str, data).await
+            pub async fn dispatch(self) -> ::anvilforge::Result<()> {
+                let container = ::anvilforge::container::current();
+                let data = ::anvilforge::serde_json::to_value(&self)
+                    .map_err(|e| ::anvilforge::Error::Internal(e.to_string()))?;
+                ::anvilforge::queue::dispatch_payload(&container, #name_str, data).await
             }
 
-            pub async fn dispatch_with(self, container: &::anvil_core::Container) -> ::anvil_core::Result<()> {
-                let data = ::anvil_core::serde_json::to_value(&self)
-                    .map_err(|e| ::anvil_core::Error::Internal(e.to_string()))?;
-                ::anvil_core::queue::dispatch_payload(container, #name_str, data).await
+            pub async fn dispatch_with(self, container: &::anvilforge::Container) -> ::anvilforge::Result<()> {
+                let data = ::anvilforge::serde_json::to_value(&self)
+                    .map_err(|e| ::anvilforge::Error::Internal(e.to_string()))?;
+                ::anvilforge::queue::dispatch_payload(container, #name_str, data).await
             }
         }
 
-        fn #runner_fn() -> ::anvil_core::queue::JobRunner {
+        fn #runner_fn() -> ::anvilforge::queue::JobRunner {
             ::std::sync::Arc::new(
-                |container: &::anvil_core::Container,
-                 payload: &::anvil_core::queue::QueuePayload|
-                 -> ::anvil_core::futures::future::BoxFuture<'_, ::anvil_core::Result<()>> {
+                |container: &::anvilforge::Container,
+                 payload: &::anvilforge::queue::QueuePayload|
+                 -> ::anvilforge::futures::future::BoxFuture<'_, ::anvilforge::Result<()>> {
                     Box::pin(async move {
-                        let job: #name = ::anvil_core::serde_json::from_value(payload.data.clone())
-                            .map_err(|e| ::anvil_core::Error::Queue(e.to_string()))?;
+                        let job: #name = ::anvilforge::serde_json::from_value(payload.data.clone())
+                            .map_err(|e| ::anvilforge::Error::Queue(e.to_string()))?;
                         job.handle(container).await
                     })
                 },
             )
         }
 
-        ::anvil_core::inventory::submit! {
-            ::anvil_core::queue::JobRegistration {
+        ::anvilforge::inventory::submit! {
+            ::anvilforge::queue::JobRegistration {
                 name: #name_str,
                 runner: #runner_fn,
             }

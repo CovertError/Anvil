@@ -1,6 +1,6 @@
 //! Migrations.
 
-use anvil::prelude::*;
+use anvilforge::prelude::*;
 use cast::Schema;
 
 pub struct CreateAuthorsTable;

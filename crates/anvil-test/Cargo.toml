@@ -1,13 +1,21 @@
 [package]
-name = "anvil-test"
+name = "anvilforge-test"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Anvil test utilities: HTTP test client, factories, fakes for mail/queue/notification."
+repository.workspace = true
+homepage.workspace = true
+description = "Anvilforge test utilities: HTTP test client, factories, fakes for mail/queue/notification."
+readme = "../../README.md"
+keywords = ["test", "testing", "web", "anvilforge"]
+categories = ["development-tools::testing", "web-programming"]
+
+[lib]
+name = "anvil_test"
 
 [dependencies]
-anvil-core = { workspace = true }
+anvilforge-core = { workspace = true }
 tokio = { workspace = true }
 axum = { workspace = true }
 tower = { workspace = true }

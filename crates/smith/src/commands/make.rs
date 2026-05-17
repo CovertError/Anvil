@@ -204,7 +204,7 @@ fn pluralize_snake(s: &str) -> String {
     }
 }
 
-const MODEL_TEMPLATE: &str = r#"use anvil::cast::Model;
+const MODEL_TEMPLATE: &str = r#"use anvilforge::cast::Model;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Model)]
@@ -218,7 +218,7 @@ pub struct {{name}} {
 }
 "#;
 
-const MIGRATION_TEMPLATE: &str = r#"use anvil::cast::{Migration, Schema};
+const MIGRATION_TEMPLATE: &str = r#"use anvilforge::cast::{Migration, Schema};
 
 pub struct {{struct_name}};
 
@@ -241,14 +241,14 @@ impl Migration for {{struct_name}} {
 {{/if}}    }
 }
 
-::anvil::inventory::submit! {
-    ::anvil::cast::migration::MigrationRegistration {
+::anvilforge::inventory::submit! {
+    ::anvilforge::cast::migration::MigrationRegistration {
         builder: || Box::new({{struct_name}}),
     }
 }
 "#;
 
-const CONTROLLER_TEMPLATE: &str = r#"use anvil::prelude::*;
+const CONTROLLER_TEMPLATE: &str = r#"use anvilforge::prelude::*;
 
 pub struct {{name}};
 
@@ -260,7 +260,7 @@ impl {{name}} {
 }
 "#;
 
-const RESOURCE_CONTROLLER_TEMPLATE: &str = r#"use anvil::prelude::*;
+const RESOURCE_CONTROLLER_TEMPLATE: &str = r#"use anvilforge::prelude::*;
 
 pub struct {{name}};
 
@@ -295,7 +295,7 @@ impl {{name}} {
 }
 "#;
 
-const REQUEST_TEMPLATE: &str = r#"use anvil::prelude::*;
+const REQUEST_TEMPLATE: &str = r#"use anvilforge::prelude::*;
 use garde::Validate;
 use serde::Deserialize;
 
@@ -306,7 +306,7 @@ pub struct {{name}} {
 }
 "#;
 
-const JOB_TEMPLATE: &str = r#"use anvil::prelude::*;
+const JOB_TEMPLATE: &str = r#"use anvilforge::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Job)]
@@ -330,7 +330,7 @@ pub struct {{name}} {
 }
 "#;
 
-const LISTENER_TEMPLATE: &str = r#"use anvil::prelude::*;
+const LISTENER_TEMPLATE: &str = r#"use anvilforge::prelude::*;
 use crate::app::events::{{event}};
 
 pub struct {{name}};

@@ -1,10 +1,18 @@
 [package]
-name = "reverb"
+name = "anvilforge-broadcast"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Reverb — websocket server with channel auth, presence, and Pusher-compatible wire protocol."
+repository.workspace = true
+homepage.workspace = true
+description = "Reverb — Anvilforge's websocket server with Pusher-compatible wire protocol."
+readme = "../../README.md"
+keywords = ["websocket", "broadcast", "pusher", "anvilforge", "reverb"]
+categories = ["web-programming::websocket", "web-programming"]
+
+[lib]
+name = "reverb"
 
 [dependencies]
 tokio = { workspace = true }

@@ -1,12 +1,18 @@
 [package]
-name = "anvil-derive"
+name = "anvilforge-derive"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Proc macros for Anvil: FormRequest, Job, Event, Listener, Authenticatable, Notification, controller routing."
+repository.workspace = true
+homepage.workspace = true
+description = "Proc macros for Anvilforge: FormRequest, Job, Migration, Listener."
+readme = "../../README.md"
+keywords = ["web", "framework", "macros", "anvilforge"]
+categories = ["web-programming", "rust-patterns"]
 
 [lib]
+name = "anvil_derive"
 proc-macro = true
 
 [dependencies]

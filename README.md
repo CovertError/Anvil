@@ -1,4 +1,4 @@
-# Anvil
+# Anvilforge
 
 > Web artisans, forged in Rust.
 
@@ -6,14 +6,14 @@ Laravel's developer experience, Rust's runtime characteristics. Same `smith make
 
 ## Install
 
-One-time install of the `smith` CLI (Anvil's equivalent of `artisan`):
+One-time install of the `smith` CLI (Anvilforge's equivalent of `artisan`):
 
 ```bash
+# From crates.io (once published):
+cargo install anvilforge-cli
+
 # From this workspace (during framework development):
 cargo install --path crates/smith
-
-# Eventually (once published to crates.io):
-# cargo install anvil-cli
 ```
 
 Verify:
@@ -43,7 +43,7 @@ That's it. You now have a working web app with:
 - A Forge layout + welcome page
 - A `users` migration
 - A `User` model with typed columns
-- The full Anvil container (db pool, cache, mailer, queue, storage)
+- The full Anvilforge container (db pool, cache, mailer, queue, storage)
 - `cargo`-driven hot reload via `smith serve --watch`
 
 ## Common smith commands
@@ -69,72 +69,30 @@ smith make:listener SendWelcomeEmail --event=UserRegistered
 smith make:test post_creation
 ```
 
-## Generated project layout
+## Published crate map
 
-```
-my-app/
-├── Cargo.toml
-├── .env.example
-├── package.json                  # Vite for CSS/JS bundling
-├── vite.config.js
-├── src/
-│   ├── main.rs                   # entry + subcommand dispatch
-│   ├── lib.rs
-│   ├── bootstrap/app.rs          # builds the Application (middleware, routes, services)
-│   ├── routes/{web,api}.rs       # route declarations
-│   ├── app/
-│   │   ├── models.rs             # Cast models
-│   │   ├── policies.rs           # auth policies
-│   │   ├── requests.rs           # form requests
-│   │   ├── schedule.rs           # scheduled tasks
-│   │   └── seeders.rs            # database seeders
-│   └── database/migrations.rs    # schema migrations
-├── resources/
-│   ├── views/                    # Forge templates (.forge.html)
-│   ├── css/app.css
-│   └── js/app.js
-├── storage/                      # local files, logs, cache, sessions
-├── public/build/                 # built assets (vite)
-└── tests/
-```
+The framework is one logical project, split into multiple crates published under the `anvilforge-` namespace:
 
-## Frontend
+| Crate on crates.io | Imported as | Role |
+|---|---|---|
+| `anvilforge` | `anvilforge` | Facade — `use anvilforge::prelude::*;` |
+| `anvilforge-core` | `anvil_core` | HTTP layer, container, auth, queue, mail, cache, sessions, storage, scheduler, validation |
+| `anvilforge-derive` | `anvil_derive` | Proc macros: `FormRequest`, `Job`, `Migration` |
+| `anvilforge-cast` | `cast` | ORM facade |
+| `anvilforge-cast-core` | `cast_core` | `Model` trait, query builder, schema, migrations |
+| `anvilforge-cast-derive` | `cast_derive` | `#[derive(Model)]`, `#[has_many]`, `#[belongs_to]` |
+| `anvilforge-templates` | `forge` | Template runtime: stack buffer, `@vite` helper, escape |
+| `anvilforge-templates-codegen` | `forge_codegen` | Forge → Askama preprocessor |
+| `anvilforge-broadcast` | `reverb` | WebSocket server (Pusher-compatible) |
+| `anvilforge-cli` | — | `smith` CLI binary |
+| `anvilforge-test` | `anvil_test` | Test client, factories |
 
-Anvil ships with [Vite](https://vitejs.dev/) for CSS/JS bundling — same as Laravel:
-
-```bash
-npm install
-npm run dev        # dev server with HMR
-npm run build      # build for production
-```
-
-The Forge `@vite(...)` directive emits the correct `<script>` / `<link>` tags
-for either mode.
-
-## Workspace crates (for framework hackers)
-
-| Crate | Purpose |
-|---|---|
-| `anvil` | Facade — `use anvil::prelude::*;` |
-| `anvil-core` | HTTP layer, container, auth, queue, mail, cache, sessions, storage, scheduler, validation |
-| `anvil-derive` | Proc macros: `FormRequest`, `Job`, `Migration` |
-| `cast` | ORM facade |
-| `cast-core` | `Model` trait, query builder, schema, migrations |
-| `cast-derive` | `#[derive(Model)]`, `#[has_many]`, `#[belongs_to]` |
-| `forge` | Template runtime: stack buffer, `@vite` helper, escape |
-| `forge-codegen` | Forge → Askama preprocessor |
-| `reverb` | WebSocket server (Pusher-compatible wire protocol) |
-| `smith` | CLI |
-| `anvil-test` | Test client, factories |
+In practice you only ever depend on `anvilforge` — the facade re-exports everything you need via `anvilforge::prelude::*`.
 
 ## Status
 
-POC. The architecture and subsystem shapes are validated end-to-end against
-`examples/blog`. Not yet on crates.io; install via path while we burn in.
-
-See [docs/PLAN.md](docs/PLAN.md) (or the plan file in `~/.claude/plans/`) for
-the v1 cut line, design decisions, and what's deferred.
+POC. The architecture is validated end-to-end against `examples/blog`. Initial publish to crates.io is in progress — versions start at `0.1.0`.
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE)

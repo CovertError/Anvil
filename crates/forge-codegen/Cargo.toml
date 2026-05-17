@@ -1,10 +1,18 @@
 [package]
-name = "forge-codegen"
+name = "anvilforge-templates-codegen"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
 description = "Forge → Askama preprocessor: parser, lowering, build.rs integration."
+readme = "../../README.md"
+keywords = ["template", "blade", "preprocessor", "anvilforge", "forge"]
+categories = ["template-engine", "development-tools::build-utils"]
+
+[lib]
+name = "forge_codegen"
 
 [dependencies]
 chumsky = { workspace = true }

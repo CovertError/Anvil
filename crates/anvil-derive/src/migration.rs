@@ -9,9 +9,9 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let name_str = name.to_string();
 
     Ok(quote! {
-        ::anvil_core::inventory::submit! {
-            ::anvil_core::cast_core::migration::MigrationRegistration {
-                builder: || -> ::std::boxed::Box<dyn ::anvil_core::cast_core::Migration> {
+        ::anvilforge::inventory::submit! {
+            ::anvilforge::cast::migration::MigrationRegistration {
+                builder: || -> ::std::boxed::Box<dyn ::anvilforge::cast::Migration> {
                     ::std::boxed::Box::new(#name)
                 },
             }

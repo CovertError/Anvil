@@ -1,13 +1,21 @@
 [package]
-name = "cast"
+name = "anvilforge-cast"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Cast ORM facade — re-exports cast-core and cast-derive."
+repository.workspace = true
+homepage.workspace = true
+description = "Cast — Eloquent-shaped ORM for Anvilforge. Facade crate."
+readme = "../../README.md"
+keywords = ["orm", "eloquent", "sqlx", "postgres", "anvilforge"]
+categories = ["database", "web-programming"]
+
+[lib]
+name = "cast"
 
 [dependencies]
-cast-core = { workspace = true }
-cast-derive = { workspace = true }
+anvilforge-cast-core = { workspace = true }
+anvilforge-cast-derive = { workspace = true }
 sqlx = { workspace = true }
 sea-query = { workspace = true }

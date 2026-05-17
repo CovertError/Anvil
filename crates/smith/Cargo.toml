@@ -1,10 +1,15 @@
 [package]
-name = "smith"
+name = "anvilforge-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Smith — Anvil's CLI (Artisan equivalent). Scaffolding, migrations, serve, queue:work, schedule:run, test."
+repository.workspace = true
+homepage.workspace = true
+description = "Smith — Anvilforge's CLI (Artisan equivalent). Scaffolding, migrations, serve, queue:work, schedule:run, test."
+readme = "../../README.md"
+keywords = ["web", "framework", "cli", "scaffold", "anvilforge"]
+categories = ["command-line-utilities", "web-programming", "development-tools"]
 
 [[bin]]
 name = "smith"

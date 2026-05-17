@@ -1,10 +1,18 @@
 [package]
-name = "cast-core"
+name = "anvilforge-cast-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Cast ORM core: Model trait, QueryBuilder, Column, Relation, Schema, migrations."
+repository.workspace = true
+homepage.workspace = true
+description = "Cast ORM core for Anvilforge: Model trait, QueryBuilder, Column, Relation, Schema, migrations."
+readme = "../../README.md"
+keywords = ["orm", "database", "sqlx", "postgres", "anvilforge"]
+categories = ["database", "web-programming"]
+
+[lib]
+name = "cast_core"
 
 [dependencies]
 tokio = { workspace = true }

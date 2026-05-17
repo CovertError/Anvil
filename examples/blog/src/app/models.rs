@@ -1,6 +1,6 @@
 //! Models for the blog example.
 
-use anvil::prelude::*;
+use anvilforge::prelude::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Model)]
 #[table("authors")]

@@ -95,17 +95,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "anvil"
+name = "anvilforge"
 version = "0.1.0"
 dependencies = [
- "anvil-core",
- "anvil-derive",
+ "anvilforge-broadcast",
+ "anvilforge-cast",
+ "anvilforge-core",
+ "anvilforge-derive",
+ "anvilforge-templates",
  "async-trait",
  "axum",
- "cast",
  "chrono",
- "forge",
- "reverb",
  "serde",
  "serde_json",
  "sqlx",
@@ -115,9 +115,92 @@ dependencies = [
 ]
 
 [[package]]
-name = "anvil-core"
+name = "anvilforge-broadcast"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "axum",
+ "base64",
+ "futures",
+ "hmac",
+ "indexmap",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
+ "tokio",
+ "tower",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "anvilforge-cast"
+version = "0.1.0"
+dependencies = [
+ "anvilforge-cast-core",
+ "anvilforge-cast-derive",
+ "sea-query",
+ "sqlx",
+]
+
+[[package]]
+name = "anvilforge-cast-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "futures",
+ "indexmap",
+ "inventory",
+ "sea-query",
+ "sea-query-binder",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "anvilforge-cast-derive"
+version = "0.1.0"
+dependencies = [
+ "darling",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "anvilforge-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "handlebars",
+ "inquire",
+ "notify",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "walkdir",
+]
+
+[[package]]
+name = "anvilforge-core"
+version = "0.1.0"
+dependencies = [
+ "anvilforge-cast-core",
+ "anvilforge-templates",
  "anyhow",
  "argon2",
  "askama",
@@ -125,11 +208,9 @@ dependencies = [
  "axum",
  "base64",
  "bytes",
- "cast-core",
  "chrono",
  "cron",
  "dotenvy",
- "forge",
  "futures",
  "garde",
  "hmac",
@@ -166,7 +247,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "anvil-derive"
+name = "anvilforge-derive"
 version = "0.1.0"
 dependencies = [
  "darling",
@@ -176,10 +257,36 @@ dependencies = [
 ]
 
 [[package]]
-name = "anvil-test"
+name = "anvilforge-templates"
 version = "0.1.0"
 dependencies = [
- "anvil-core",
+ "askama",
+ "indexmap",
+ "once_cell",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "anvilforge-templates-codegen"
+version = "0.1.0"
+dependencies = [
+ "chumsky",
+ "indexmap",
+ "regex",
+ "thiserror 1.0.69",
+ "walkdir",
+]
+
+[[package]]
+name = "anvilforge-test"
+version = "0.1.0"
+dependencies = [
+ "anvilforge-core",
  "async-trait",
  "axum",
  "bytes",
@@ -488,17 +595,17 @@ dependencies = [
 name = "blog"
 version = "0.1.0"
 dependencies = [
- "anvil",
- "anvil-core",
- "anvil-derive",
- "anvil-test",
+ "anvilforge",
+ "anvilforge-cast",
+ "anvilforge-core",
+ "anvilforge-derive",
+ "anvilforge-templates",
+ "anvilforge-templates-codegen",
+ "anvilforge-test",
  "anyhow",
  "async-trait",
  "axum",
- "cast",
  "chrono",
- "forge",
- "forge-codegen",
  "garde",
  "serde",
  "serde_json",
@@ -542,46 +649,6 @@ checksum = "655fa70596e2a38372c0c0c4449ec0166ad9cc43d91558bbecc1a6f38bf9eb91"
 dependencies = [
  "lazy_static",
  "regex",
-]
-
-[[package]]
-name = "cast"
-version = "0.1.0"
-dependencies = [
- "cast-core",
- "cast-derive",
- "sea-query",
- "sqlx",
-]
-
-[[package]]
-name = "cast-core"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "futures",
- "indexmap",
- "inventory",
- "sea-query",
- "sea-query-binder",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "cast-derive"
-version = "0.1.0"
-dependencies = [
- "darling",
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -1217,32 +1284,6 @@ name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
-
-[[package]]
-name = "forge"
-version = "0.1.0"
-dependencies = [
- "askama",
- "indexmap",
- "once_cell",
- "parking_lot",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "forge-codegen"
-version = "0.1.0"
-dependencies = [
- "chumsky",
- "indexmap",
- "regex",
- "thiserror 1.0.69",
- "walkdir",
-]
 
 [[package]]
 name = "form_urlencoded"
@@ -2967,27 +3008,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reverb"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "axum",
- "base64",
- "futures",
- "hmac",
- "indexmap",
- "parking_lot",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 1.0.69",
- "tokio",
- "tower",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "ring"
 version = "0.17.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3367,26 +3387,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "smith"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "handlebars",
- "inquire",
- "notify",
- "regex",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "walkdir",
 ]
 
 [[package]]

@@ -1,10 +1,18 @@
 [package]
-name = "anvil-core"
+name = "anvilforge-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Anvil core: routing, middleware, container, request/response, error type, runtime cross-cutting concerns."
+repository.workspace = true
+homepage.workspace = true
+description = "Anvilforge core: routing, middleware, container, request/response, error type, runtime cross-cutting concerns."
+readme = "../../README.md"
+keywords = ["web", "framework", "laravel", "axum", "anvilforge"]
+categories = ["web-programming", "web-programming::http-server"]
+
+[lib]
+name = "anvil_core"
 
 [dependencies]
 tokio = { workspace = true }
@@ -49,6 +57,6 @@ bytes = { workspace = true }
 mime = { workspace = true }
 regex = { workspace = true }
 indexmap = { workspace = true }
-forge = { workspace = true }
-cast-core = { workspace = true }
+anvilforge-templates = { workspace = true }
+anvilforge-cast-core = { workspace = true }
 askama = { workspace = true }

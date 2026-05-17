@@ -19,8 +19,9 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-authors = ["Anvil contributors"]
-repository = "https://github.com/anvil-rs/anvil"
+authors = ["Anvilforge contributors"]
+repository = "https://github.com/anvilforge/anvilforge"
+homepage = "https://github.com/anvilforge/anvilforge"
 rust-version = "1.85"
 
 [workspace.dependencies]
@@ -122,17 +123,19 @@ bytes = "1.7"
 mime = "0.3"
 mime_guess = "2.0"
 
-# Internal crates
-anvil = { path = "crates/anvil", version = "0.1.0" }
-anvil-core = { path = "crates/anvil-core", version = "0.1.0" }
-anvil-derive = { path = "crates/anvil-derive", version = "0.1.0" }
-anvil-test = { path = "crates/anvil-test", version = "0.1.0" }
-cast = { path = "crates/cast", version = "0.1.0" }
-cast-core = { path = "crates/cast-core", version = "0.1.0" }
-cast-derive = { path = "crates/cast-derive", version = "0.1.0" }
-forge = { path = "crates/forge", version = "0.1.0" }
-forge-codegen = { path = "crates/forge-codegen", version = "0.1.0" }
-reverb = { path = "crates/reverb", version = "0.1.0" }
+# Internal crates — published names use `anvilforge-*` prefix.
+# Workspace dep keys match published names; [lib].name fields preserve the old
+# import names (`cast`, `forge`, `reverb`, etc.) so internal code is untouched.
+anvilforge = { path = "crates/anvil", version = "0.1.0" }
+anvilforge-core = { path = "crates/anvil-core", version = "0.1.0" }
+anvilforge-derive = { path = "crates/anvil-derive", version = "0.1.0" }
+anvilforge-test = { path = "crates/anvil-test", version = "0.1.0" }
+anvilforge-cast = { path = "crates/cast", version = "0.1.0" }
+anvilforge-cast-core = { path = "crates/cast-core", version = "0.1.0" }
+anvilforge-cast-derive = { path = "crates/cast-derive", version = "0.1.0" }
+anvilforge-templates = { path = "crates/forge", version = "0.1.0" }
+anvilforge-templates-codegen = { path = "crates/forge-codegen", version = "0.1.0" }
+anvilforge-broadcast = { path = "crates/reverb", version = "0.1.0" }
 
 [profile.dev]
 opt-level = 0

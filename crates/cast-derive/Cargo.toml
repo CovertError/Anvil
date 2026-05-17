@@ -1,12 +1,18 @@
 [package]
-name = "cast-derive"
+name = "anvilforge-cast-derive"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
 description = "Cast ORM derive macros: #[derive(Model)], #[has_many], #[belongs_to], #[scope]."
+readme = "../../README.md"
+keywords = ["orm", "derive", "macros", "anvilforge", "cast"]
+categories = ["database", "rust-patterns"]
 
 [lib]
+name = "cast_derive"
 proc-macro = true
 
 [dependencies]

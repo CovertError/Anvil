@@ -1,6 +1,6 @@
 //! Application bootstrap. Wires middleware, routes, services.
 
-use anvil::prelude::*;
+use anvilforge::prelude::*;
 use anvil_core::Application;
 
 use crate::routes;

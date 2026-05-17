@@ -10,18 +10,18 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
 
     Ok(quote! {
         // Re-export the FromRequest extractor by wrapping in ValidatedForm.
-        #[::async_trait::async_trait]
-        impl #impl_g ::axum::extract::FromRequest<::anvil_core::Container> for #name #ty_g
+        #[::anvilforge::async_trait::async_trait]
+        impl #impl_g ::anvilforge::axum::extract::FromRequest<::anvilforge::Container> for #name #ty_g
             #where_g
         {
-            type Rejection = ::anvil_core::Error;
+            type Rejection = ::anvilforge::Error;
 
             async fn from_request(
-                req: ::axum::extract::Request,
-                state: &::anvil_core::Container,
+                req: ::anvilforge::axum::extract::Request,
+                state: &::anvilforge::Container,
             ) -> ::std::result::Result<Self, Self::Rejection> {
-                let ::anvil_core::validation::ValidatedForm(value) =
-                    ::anvil_core::validation::ValidatedForm::<Self>::from_request(req, state)
+                let ::anvilforge::validation::ValidatedForm(value) =
+                    ::anvilforge::validation::ValidatedForm::<Self>::from_request(req, state)
                         .await?;
                 Ok(value)
             }

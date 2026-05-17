@@ -1,17 +1,25 @@
 [package]
-name = "anvil"
+name = "anvilforge"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Anvil — Laravel-equivalent Rust web framework. Facade crate that re-exports everything users need."
+repository.workspace = true
+homepage.workspace = true
+description = "Anvilforge — Laravel-equivalent Rust web framework. Forge web apps with Eloquent-shape ORM, Blade-style templates, queues, mail, and more."
+readme = "../../README.md"
+keywords = ["web", "framework", "laravel", "axum", "rust"]
+categories = ["web-programming", "web-programming::http-server"]
+
+[lib]
+name = "anvilforge"
 
 [dependencies]
-anvil-core = { workspace = true }
-anvil-derive = { workspace = true }
-cast = { workspace = true }
-forge = { workspace = true }
-reverb = { workspace = true }
+anvilforge-core = { workspace = true }
+anvilforge-derive = { workspace = true }
+anvilforge-cast = { workspace = true }
+anvilforge-templates = { workspace = true }
+anvilforge-broadcast = { workspace = true }
 tokio = { workspace = true }
 axum = { workspace = true }
 serde = { workspace = true }

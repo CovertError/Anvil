@@ -43,8 +43,8 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         let col_name = ident.to_string();
         let ty = &f.ty;
         quote! {
-            pub fn #ident(&self) -> ::cast::Column<#struct_name, #ty> {
-                ::cast::Column::new(#col_name)
+            pub fn #ident(&self) -> ::anvilforge::cast::Column<#struct_name, #ty> {
+                ::anvilforge::cast::Column::new(#col_name)
             }
         }
     });
@@ -89,7 +89,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     });
 
     let output = quote! {
-        impl ::cast::Model for #struct_name {
+        impl ::anvilforge::cast::Model for #struct_name {
             type PrimaryKey = #pk_field_type;
             const TABLE: &'static str = #table_lit;
             const PK_COLUMN: &'static str = #pk_lit;
@@ -117,9 +117,9 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
 
         #(#relation_types)*
 
-        impl<'r> ::cast::sqlx::FromRow<'r, ::cast::sqlx::postgres::PgRow> for #struct_name {
-            fn from_row(row: &'r ::cast::sqlx::postgres::PgRow) -> ::cast::sqlx::Result<Self> {
-                use ::cast::sqlx::Row as _;
+        impl<'r> ::anvilforge::cast::sqlx::FromRow<'r, ::anvilforge::cast::sqlx::postgres::PgRow> for #struct_name {
+            fn from_row(row: &'r ::anvilforge::cast::sqlx::postgres::PgRow) -> ::anvilforge::cast::sqlx::Result<Self> {
+                use ::anvilforge::cast::sqlx::Row as _;
                 Ok(Self {
                     #(#from_row_fields)*
                 })
@@ -185,10 +185,10 @@ fn relation_type_decl(parent: &syn::Ident, rel: &RelationDecl) -> TokenStream {
         #[doc(hidden)]
         pub struct #rel_type_name;
 
-        impl ::cast::RelationDef for #rel_type_name {
+        impl ::anvilforge::cast::RelationDef for #rel_type_name {
             type Parent = #parent_ident;
             type Child = #child;
-            type Kind = ::cast::#kind;
+            type Kind = ::anvilforge::cast::#kind;
             fn local_key() -> &'static str { #local_key }
             fn foreign_key() -> &'static str { #foreign_key }
         }
@@ -212,15 +212,15 @@ fn expand_relation(
             // For has_many / has_one: parent's PK value is the local value;
             // we filter the child table by `foreign_key = self.pk_field`.
             let load_method = if rel.kind == "HasMany" {
-                quote! { pub async fn #method(&self, pool: &::cast::Pool) -> ::cast::Result<Vec<#child>> {
-                    use ::cast::Model as _;
+                quote! { pub async fn #method(&self, pool: &::anvilforge::cast::Pool) -> ::anvilforge::cast::Result<Vec<#child>> {
+                    use ::anvilforge::cast::Model as _;
                     #child::query()
                         .where_eq(#child::columns().#foreign_key_field(), self.#pk_field.clone())
                         .get(pool).await
                 }}
             } else {
-                quote! { pub async fn #method(&self, pool: &::cast::Pool) -> ::cast::Result<Option<#child>> {
-                    use ::cast::Model as _;
+                quote! { pub async fn #method(&self, pool: &::anvilforge::cast::Pool) -> ::anvilforge::cast::Result<Option<#child>> {
+                    use ::anvilforge::cast::Model as _;
                     #child::query()
                         .where_eq(#child::columns().#foreign_key_field(), self.#pk_field.clone())
                         .first(pool).await
@@ -243,8 +243,8 @@ fn expand_relation(
                     #rel_type_name
                 }
 
-                pub async fn #method(&self, pool: &::cast::Pool) -> ::cast::Result<Option<#child>> {
-                    use ::cast::Model as _;
+                pub async fn #method(&self, pool: &::anvilforge::cast::Pool) -> ::anvilforge::cast::Result<Option<#child>> {
+                    use ::anvilforge::cast::Model as _;
                     #child::find(pool, self.#foreign_key_field.clone()).await
                 }
             }

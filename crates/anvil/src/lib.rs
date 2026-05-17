@@ -1,12 +1,12 @@
-//! Anvil — Laravel-equivalent Rust web framework.
+//! Anvilforge — Laravel-equivalent Rust web framework.
 //!
 //! ```ignore
-//! use anvil::prelude::*;
+//! use anvilforge::prelude::*;
 //!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {
-//!     anvil::config::load_dotenv();
-//!     anvil::tracing_init::init();
+//!     anvilforge::config::load_dotenv();
+//!     anvilforge::tracing_init::init();
 //!
 //!     let app = Application::builder()
 //!         .web(|r| r.get("/", |_: State<Container>| async { "hello" }))
