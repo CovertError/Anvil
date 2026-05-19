@@ -17,7 +17,7 @@
 //! ```
 
 pub use anvil_core::*;
-pub use anvil_derive::{FormRequest, Job, Migration};
+pub use anvil_derive::{FormRequest, Job, Migration, Seeder};
 
 pub use anvil_test;
 pub use bellows;
@@ -44,7 +44,7 @@ pub mod prelude {
     pub use crate::view;
     pub use crate::Application;
 
-    pub use anvil_derive::{FormRequest, Job, Migration};
+    pub use anvil_derive::{FormRequest, Job, Migration, Seeder};
 
     // Spark — reactive components.
     pub use spark::prelude::*;

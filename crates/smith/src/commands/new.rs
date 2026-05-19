@@ -52,8 +52,8 @@ pub fn run(target: &str) -> Result<()> {
     println!("    cd {}", root.display());
     println!("    cp .env.example .env");
     println!("    # configure DATABASE_URL in .env");
-    println!("    smith migrate");
-    println!("    smith serve");
+    println!("    anvil migrate");
+    println!("    anvil serve");
     println!();
     println!("  layout: top-level app/, bootstrap/, config/, etc. — Laravel-style.");
     println!("  Rust source: src/main.rs + src/lib.rs shim; everything else lives outside src/.");
@@ -299,8 +299,8 @@ A web app built with [Anvilforge](https://github.com/anvilforge/anvilforge) — 
 ```bash
 cp .env.example .env
 # edit DATABASE_URL to point at your Postgres
-smith migrate
-smith serve
+anvil migrate
+anvil serve
 ```
 
 Open <http://localhost:8080>.
@@ -324,17 +324,17 @@ src/        Rust entry (main.rs + lib.rs glue)
 ## Useful commands
 
 ```bash
-smith serve --watch              # dev server with auto-reload
-smith migrate                    # apply pending migrations
-smith migrate:rollback           # undo the last migration batch
-smith migrate:fresh --seed       # drop + remigrate + seed
-smith db:seed                    # run database seeders
-smith make:model Post --with-migration
-smith make:controller PostController --resource
-smith make:auth                  # scaffold login/register/logout
-smith queue:work                 # start the queue worker
-smith schedule:run               # run scheduled tasks (call from cron)
-smith test                       # run tests
+anvil serve --watch              # dev server with auto-reload
+anvil migrate                    # apply pending migrations
+anvil migrate:rollback           # undo the last migration batch
+anvil migrate:fresh --seed       # drop + remigrate + seed
+anvil db:seed                    # run database seeders
+anvil make:model Post --with-migration
+anvil make:controller PostController --resource
+anvil make:auth                  # scaffold login/register/logout
+anvil queue:work                 # start the queue worker
+anvil schedule:run               # run scheduled tasks (call from cron)
+anvil test                       # run tests
 ```
 "#,
         ),
@@ -391,7 +391,7 @@ use anvilforge::cache::CacheStore;
 use anvilforge::container::ContainerBuilder;
 use anyhow::Result;
 
-use {crate_name}::{{bootstrap, database, routes}};
+use {crate_name}::{{bootstrap, routes}};
 use {crate_name}::database::seeders::DatabaseSeeder;
 
 #[tokio::main]
@@ -422,7 +422,7 @@ async fn main() -> Result<()> {{
     }}
 }}
 
-async fn build_pool() -> Result<sqlx::PgPool> {{
+async fn build_pool() -> Result<anvilforge::cast::Pool> {{
     let cfg = anvilforge::config::DatabaseConfig::from_env();
     let pool = anvilforge::cast::connect(cfg.default_url(), cfg.default_pool_size()).await?;
     Ok(pool)
@@ -487,7 +487,7 @@ async fn run_migrate(args: &[String]) -> Result<()> {{
     }} else {{
         for name in applied {{ println!("migrated: {{name}}"); }}
     }}
-    if has_flag(args, "--seed") {{ run_seed().await?; }}
+    if has_flag(args, "--seed") {{ run_seed(&[]).await?; }}
     Ok(())
 }}
 
@@ -525,7 +525,7 @@ async fn run_migrate_refresh(args: &[String]) -> Result<()> {{
     let runner = anvilforge::cast::MigrationRunner::new(pool);
     let applied = runner.refresh().await?;
     for name in applied {{ println!("migrated: {{name}}"); }}
-    if has_flag(args, "--seed") {{ run_seed().await?; }}
+    if has_flag(args, "--seed") {{ run_seed(&[]).await?; }}
     Ok(())
 }}
 
@@ -534,7 +534,7 @@ async fn run_migrate_fresh(args: &[String]) -> Result<()> {{
     let runner = anvilforge::cast::MigrationRunner::new(pool);
     runner.fresh().await?;
     println!("fresh migrations complete");
-    if has_flag(args, "--seed") {{ run_seed().await?; }}
+    if has_flag(args, "--seed") {{ run_seed(&[]).await?; }}
     Ok(())
 }}
 
@@ -563,9 +563,15 @@ async fn run_migrate_status() -> Result<()> {{
 
 async fn run_db_wipe() -> Result<()> {{
     let pool = build_pool().await?;
-    sqlx::query("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
-        .execute(&pool)
-        .await?;
+    // `cast::Pool` is the multi-driver wrapper; reach into the underlying
+    // driver-specific sqlx pool to issue raw DDL.
+    if let Some(pg) = pool.as_postgres() {{
+        sqlx::query("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+            .execute(pg)
+            .await?;
+    }} else {{
+        anyhow::bail!("db:wipe is only implemented for Postgres in the default scaffold");
+    }}
     println!("database wiped");
     Ok(())
 }}
