@@ -15,8 +15,18 @@ use std::sync::Once;
 use anvilforge::cast::{self, MigrationRunner, Model};
 use blog::app::migrations;
 use blog::app::models::{Author, Post};
+use tokio::sync::Mutex;
 
 static INIT: Once = Once::new();
+
+/// Serialize every test in this file. The harness defaults to running tests in
+/// parallel, but they all share the same `public` schema on the single CI
+/// Postgres service. Two tests reaching `reset_schema` + `run_up` at once race
+/// on `pg_class_relname_nsp_index` (the sequence created by `migrations` rolls
+/// in twice with the same name in the same namespace). Holding this mutex for
+/// the whole test body keeps the cargo-test-side ergonomics (`cargo test`
+/// works without `-- --test-threads=1`) while preserving correctness.
+static DB_LOCK: Mutex<()> = Mutex::const_new(());
 
 fn ensure_logging() {
     INIT.call_once(|| {
@@ -36,7 +46,21 @@ fn pg(p: &cast::Pool) -> &sqlx::PgPool {
     p.as_postgres().expect("test expects a Postgres pool")
 }
 
-async fn reset_schema(pool: &cast::Pool) {
+/// Reset `public` schema for a clean test slate.
+///
+/// Returns a `MutexGuard` that the caller must keep alive for the duration of
+/// the test — releasing it before the test finishes would let another test's
+/// `reset_schema` race the in-flight migrations. The intended pattern is:
+///
+/// ```ignore
+/// let _guard = reset_schema(&pool).await;
+/// ```
+///
+/// `_guard` lives until the function returns, serializing every test in this
+/// file against the shared `public` schema.
+#[must_use = "the returned guard serializes tests; bind it to a `_guard` local"]
+async fn reset_schema(pool: &cast::Pool) -> tokio::sync::MutexGuard<'static, ()> {
+    let guard = DB_LOCK.lock().await;
     sqlx::query("DROP SCHEMA IF EXISTS public CASCADE")
         .execute(pg(pool))
         .await
@@ -45,6 +69,7 @@ async fn reset_schema(pool: &cast::Pool) {
         .execute(pg(pool))
         .await
         .ok();
+    guard
 }
 
 #[tokio::test]
@@ -54,7 +79,7 @@ async fn migrations_apply_and_rollback() {
         eprintln!("SKIP: DATABASE_URL not set");
         return;
     };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
 
     let runner = MigrationRunner::with_migrations(pool.clone(), migrations::all());
     let applied = runner.run_up().await.expect("migrations up failed");
@@ -84,7 +109,7 @@ async fn cast_basic_crud_round_trip() {
         eprintln!("SKIP: DATABASE_URL not set");
         return;
     };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let runner = MigrationRunner::with_migrations(pool.clone(), migrations::all());
     runner.run_up().await.unwrap();
 
@@ -146,7 +171,7 @@ async fn cast_query_builder_filters_and_orders() {
         eprintln!("SKIP: DATABASE_URL not set");
         return;
     };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let runner = MigrationRunner::with_migrations(pool.clone(), migrations::all());
     runner.run_up().await.unwrap();
 
@@ -207,7 +232,7 @@ async fn model_save_inserts_when_pk_is_default() {
         eprintln!("SKIP: DATABASE_URL not set");
         return;
     };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let runner = MigrationRunner::with_migrations(pool.clone(), migrations::all());
     runner.run_up().await.unwrap();
 
@@ -230,7 +255,7 @@ async fn model_save_updates_when_pk_is_set() {
         eprintln!("SKIP: DATABASE_URL not set");
         return;
     };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let runner = MigrationRunner::with_migrations(pool.clone(), migrations::all());
     runner.run_up().await.unwrap();
 
@@ -261,7 +286,7 @@ async fn model_delete_removes_the_row() {
         eprintln!("SKIP: DATABASE_URL not set");
         return;
     };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let runner = MigrationRunner::with_migrations(pool.clone(), migrations::all());
     runner.run_up().await.unwrap();
 
@@ -309,7 +334,7 @@ async fn seed_three_authors(pool: &cast::Pool) -> Vec<i64> {
 async fn where_in_filters_by_id_list() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let ids = seed_three_authors(&pool).await;
 
     let by_ids: Vec<Author> = Author::query()
@@ -324,7 +349,7 @@ async fn where_in_filters_by_id_list() {
 async fn where_not_in_excludes_listed_ids() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let ids = seed_three_authors(&pool).await;
 
     let excluded: Vec<Author> = Author::query()
@@ -339,7 +364,7 @@ async fn where_not_in_excludes_listed_ids() {
 async fn where_like_pattern_match() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     seed_three_authors(&pool).await;
 
     let matched: Vec<Author> = Author::query()
@@ -355,7 +380,7 @@ async fn where_like_pattern_match() {
 async fn where_between_inclusive_range() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let ids = seed_three_authors(&pool).await;
 
     let between: Vec<Author> = Author::query()
@@ -370,7 +395,7 @@ async fn where_between_inclusive_range() {
 async fn where_null_and_not_null() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let runner = MigrationRunner::with_migrations(pool.clone(), migrations::all());
     runner.run_up().await.unwrap();
     // Insert one author with NULL updated_at and one with a value.
@@ -406,7 +431,7 @@ async fn where_null_and_not_null() {
 async fn aggregates_min_max_sum_avg() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let ids = seed_three_authors(&pool).await;
 
     let min_id: Option<i64> = Author::query()
@@ -438,7 +463,7 @@ async fn aggregates_min_max_sum_avg() {
 async fn exists_and_doesnt_exist() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     seed_three_authors(&pool).await;
 
     assert!(Author::query()
@@ -457,7 +482,7 @@ async fn exists_and_doesnt_exist() {
 async fn latest_and_oldest_order_by_created_at() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     seed_three_authors(&pool).await;
 
     // We seeded in order Ada, Bob, Cleo; created_at DESC -> Cleo first.
@@ -485,7 +510,7 @@ async fn latest_and_oldest_order_by_created_at() {
 async fn take_and_skip_aliases() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     seed_three_authors(&pool).await;
 
     let page: Vec<Author> = Author::query()
@@ -503,7 +528,7 @@ async fn take_and_skip_aliases() {
 async fn pluck_returns_one_column() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     seed_three_authors(&pool).await;
 
     let names: Vec<String> = Author::query()
@@ -518,7 +543,7 @@ async fn pluck_returns_one_column() {
 async fn value_returns_first_column_value() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     seed_three_authors(&pool).await;
 
     let first_name: Option<String> = Author::query()
@@ -533,7 +558,7 @@ async fn value_returns_first_column_value() {
 async fn first_or_fail_terminal() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     seed_three_authors(&pool).await;
 
     let found = Author::query()
@@ -554,7 +579,7 @@ async fn first_or_fail_terminal() {
 async fn find_many_returns_models_in_id_set() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let ids = seed_three_authors(&pool).await;
 
     let some: Vec<Author> = Author::find_many(pg(&pool), [ids[0], ids[2]])
@@ -572,7 +597,7 @@ async fn find_many_returns_models_in_id_set() {
 async fn destroy_deletes_listed_ids() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let ids = seed_three_authors(&pool).await;
 
     let n = Author::destroy(pg(&pool), [ids[0], ids[2]]).await.unwrap();
@@ -586,7 +611,7 @@ async fn destroy_deletes_listed_ids() {
 async fn truncate_empties_the_table() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     seed_three_authors(&pool).await;
 
     // Posts has a FK to authors with ON DELETE CASCADE, so we truncate it first
@@ -600,7 +625,7 @@ async fn truncate_empties_the_table() {
 async fn refresh_reloads_self_from_db() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let runner = MigrationRunner::with_migrations(pool.clone(), migrations::all());
     runner.run_up().await.unwrap();
 
@@ -629,7 +654,7 @@ async fn refresh_reloads_self_from_db() {
 async fn fresh_returns_new_instance_without_mutating_self() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let runner = MigrationRunner::with_migrations(pool.clone(), migrations::all());
     runner.run_up().await.unwrap();
 
@@ -663,7 +688,7 @@ async fn fresh_returns_new_instance_without_mutating_self() {
 async fn paginator_slices_and_returns_total() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let runner = MigrationRunner::with_migrations(pool.clone(), migrations::all());
     runner.run_up().await.unwrap();
     for i in 0..15 {
@@ -706,7 +731,7 @@ async fn paginator_slices_and_returns_total() {
 async fn where_has_filters_by_related_existence() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let ids = seed_three_authors(&pool).await;
     // Ada and Bob get posts; Cleo gets none.
     sqlx::query(
@@ -742,7 +767,7 @@ async fn where_has_filters_by_related_existence() {
 async fn where_doesnt_have_filters_negation() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let ids = seed_three_authors(&pool).await;
     sqlx::query(
         "INSERT INTO posts (author_id, title, body, published) VALUES ($1, 't', 'b', true)",
@@ -767,7 +792,7 @@ async fn where_doesnt_have_filters_negation() {
 async fn with_count_of_returns_models_plus_counts() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let ids = seed_three_authors(&pool).await;
     for _ in 0..3 {
         sqlx::query(
@@ -826,7 +851,7 @@ mod author_scopes_test {
 async fn local_scopes_chain_on_query_builder() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     seed_three_authors(&pool).await;
 
     let result: Vec<Author> = author_scopes_test::build().get(pg(&pool)).await.unwrap();
@@ -840,7 +865,7 @@ async fn local_scopes_chain_on_query_builder() {
 async fn or_where_eq_unions_predicates() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     seed_three_authors(&pool).await;
 
     let found: Vec<Author> = Author::query()
@@ -858,7 +883,7 @@ async fn or_where_eq_unions_predicates() {
 async fn or_where_in_unions_with_id_set() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let ids = seed_three_authors(&pool).await;
 
     let found: Vec<Author> = Author::query()
@@ -874,7 +899,7 @@ async fn or_where_in_unions_with_id_set() {
 async fn or_where_null_unions_with_explicit_null() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let runner = MigrationRunner::with_migrations(pool.clone(), migrations::all());
     runner.run_up().await.unwrap();
     sqlx::query("INSERT INTO authors (name, email, updated_at) VALUES ($1, $2, NULL)")
@@ -905,7 +930,7 @@ async fn or_where_null_unions_with_explicit_null() {
 async fn join_links_two_tables() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let ids = seed_three_authors(&pool).await;
     // Ada gets 2 posts, others get none.
     sqlx::query(
@@ -936,7 +961,7 @@ async fn join_links_two_tables() {
 async fn left_join_keeps_authors_without_posts() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let ids = seed_three_authors(&pool).await;
     sqlx::query(
         "INSERT INTO posts (author_id, title, body, published) VALUES ($1, 'Hi', 'body', true)",
@@ -961,7 +986,7 @@ async fn left_join_keeps_authors_without_posts() {
 async fn group_by_with_having_filters_aggregate() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let ids = seed_three_authors(&pool).await;
     // Ada gets 2 posts, Bob gets 1, Cleo gets 0.
     for _ in 0..2 {
@@ -1016,7 +1041,7 @@ async fn group_by_with_having_filters_aggregate() {
 async fn soft_delete_methods_work_on_query() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
 
     // Build a fresh table with deleted_at.
     sqlx::query(
@@ -1066,7 +1091,7 @@ async fn soft_delete_methods_work_on_query() {
 async fn first_or_create_returns_existing_when_match() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     seed_three_authors(&pool).await;
 
     let user = Author::first_or_create(
@@ -1089,7 +1114,7 @@ async fn first_or_create_returns_existing_when_match() {
 async fn first_or_create_inserts_when_no_match() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     seed_three_authors(&pool).await;
 
     let user = Author::first_or_create(
@@ -1113,7 +1138,7 @@ async fn first_or_create_inserts_when_no_match() {
 async fn update_or_create_updates_when_match() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     seed_three_authors(&pool).await;
 
     let user = Author::update_or_create(
@@ -1144,7 +1169,7 @@ async fn update_or_create_updates_when_match() {
 async fn update_or_create_inserts_when_no_match() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     seed_three_authors(&pool).await;
 
     let user = Author::update_or_create(
@@ -1168,7 +1193,7 @@ async fn update_or_create_inserts_when_no_match() {
 async fn replicate_clones_with_reset_pk() {
     ensure_logging();
     let Some(pool) = pool().await else { return };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     seed_three_authors(&pool).await;
 
     let ada = Author::query()
@@ -1191,7 +1216,7 @@ async fn author_factory_count_and_create_via_model_factory() {
         eprintln!("SKIP: DATABASE_URL not set");
         return;
     };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let runner = MigrationRunner::with_migrations(pool.clone(), migrations::all());
     runner.run_up().await.unwrap();
 
@@ -1227,7 +1252,7 @@ async fn model_find_or_fail_errors_when_missing() {
         eprintln!("SKIP: DATABASE_URL not set");
         return;
     };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let runner = MigrationRunner::with_migrations(pool.clone(), migrations::all());
     runner.run_up().await.unwrap();
 
@@ -1245,7 +1270,7 @@ async fn migrate_status_lists_applied_and_pending() {
         eprintln!("SKIP: DATABASE_URL not set");
         return;
     };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
 
     let runner = MigrationRunner::with_migrations(pool.clone(), migrations::all());
     // Pre: nothing applied yet.
@@ -1273,7 +1298,7 @@ async fn migrate_reset_rolls_back_everything_then_re_migrate() {
         eprintln!("SKIP: DATABASE_URL not set");
         return;
     };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
 
     let runner = MigrationRunner::with_migrations(pool.clone(), migrations::all());
     runner.run_up().await.expect("up");
@@ -1292,7 +1317,7 @@ async fn migrate_refresh_resets_and_remigrates() {
         eprintln!("SKIP: DATABASE_URL not set");
         return;
     };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
 
     let runner = MigrationRunner::with_migrations(pool.clone(), migrations::all());
     runner.run_up().await.unwrap();
@@ -1310,7 +1335,7 @@ async fn migrate_run_up_step_uses_distinct_batches() {
         eprintln!("SKIP: DATABASE_URL not set");
         return;
     };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
 
     let runner = MigrationRunner::with_migrations(pool.clone(), migrations::all());
     runner.run_up_step().await.expect("step up");
@@ -1334,7 +1359,7 @@ async fn migrate_pretend_returns_sql_without_executing() {
         eprintln!("SKIP: DATABASE_URL not set");
         return;
     };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
 
     let runner = MigrationRunner::with_migrations(pool.clone(), migrations::all());
     let lines = runner.pretend().await.expect("pretend");
@@ -1361,7 +1386,7 @@ async fn schema_table_alter_adds_and_drops_columns() {
         eprintln!("SKIP: DATABASE_URL not set");
         return;
     };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
 
     // Create a baseline table.
     sqlx::query("CREATE TABLE widgets (id BIGSERIAL PRIMARY KEY, name VARCHAR(255) NOT NULL)")
@@ -1406,7 +1431,7 @@ async fn schema_richer_column_types_compile_to_valid_sql() {
         eprintln!("SKIP: DATABASE_URL not set");
         return;
     };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
 
     let mut schema = cast::Schema::new();
     schema.create("products", |t| {
@@ -1505,7 +1530,7 @@ async fn queue_db_driver_push_pop() {
         eprintln!("SKIP: DATABASE_URL not set");
         return;
     };
-    reset_schema(&pool).await;
+    let _guard = reset_schema(&pool).await;
     let runner = MigrationRunner::with_migrations(pool.clone(), migrations::all());
     runner.run_up().await.unwrap();
 

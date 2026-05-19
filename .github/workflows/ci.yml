@@ -79,7 +79,7 @@ jobs:
         run: cargo test --workspace --all-targets
 
   scaffold:
-    name: Smith scaffold check
+    name: Anvil scaffold check
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -97,12 +97,12 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install smith
+      - name: Install anvil CLI
         run: cargo install --path crates/smith --force
 
       - name: Scaffold a project
         run: |
           cd /tmp
-          smith new scaffold_check
+          anvil new scaffold_check
           cd scaffold_check
           cargo check
