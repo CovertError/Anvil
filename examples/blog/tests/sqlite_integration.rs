@@ -12,8 +12,18 @@ use anvil_core::seeder::{Seeder, SeederRegistry};
 use anvilforge::async_trait::async_trait;
 use anvilforge::cast::{self, Driver, MigrationRunner, Schema};
 
+/// Per-call unique sqlite file. Using just `process::id()` would share the
+/// path across every test in this binary and race them under cargo's parallel
+/// test harness (multiple tests deleting + re-creating the same file).
 async fn sqlite_pool() -> cast::Pool {
-    let path = std::env::temp_dir().join(format!("anvilforge-sqlite-{}.db", std::process::id()));
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let n = SEQ.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "anvilforge-sqlite-{}-{}.db",
+        std::process::id(),
+        n
+    ));
     let _ = std::fs::remove_file(&path); // start fresh each test run
     let url = format!("sqlite:{}", path.display());
     cast::connect(&url, 5).await.expect("connect sqlite")
