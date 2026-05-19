@@ -19,11 +19,8 @@ async fn sqlite_pool() -> cast::Pool {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!(
-        "anvilforge-sqlite-{}-{}.db",
-        std::process::id(),
-        n
-    ));
+    let path =
+        std::env::temp_dir().join(format!("anvilforge-sqlite-{}-{}.db", std::process::id(), n));
     let _ = std::fs::remove_file(&path); // start fresh each test run
     let url = format!("sqlite:{}", path.display());
     cast::connect(&url, 5).await.expect("connect sqlite")
