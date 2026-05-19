@@ -39,15 +39,10 @@ pub fn migration(name: &str) -> Result<()> {
     let path = project_root().join("database/migrations").join(&file_name);
 
     // Try to infer "create_X_table" → X
-    let table = if let Some(start) = name.strip_prefix("create_") {
-        if let Some(rest) = start.strip_suffix("_table") {
-            Some(rest.to_string())
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+    let table = name
+        .strip_prefix("create_")
+        .and_then(|s| s.strip_suffix("_table"))
+        .map(|s| s.to_string());
 
     let struct_name = pascal_case(name);
     write_template(

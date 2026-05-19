@@ -9,6 +9,7 @@ use std::marker::PhantomData;
 use sea_query::DynIden;
 
 #[derive(Debug, Clone, Copy)]
+#[allow(clippy::type_complexity)]
 pub struct Column<M, T> {
     name: &'static str,
     _marker: PhantomData<(fn() -> M, fn() -> T)>,

@@ -25,6 +25,7 @@ pub struct Expect<T>(pub T);
 pub struct Not<T>(pub T);
 
 impl<T> Expect<T> {
+    #[allow(clippy::should_implement_trait)]
     pub fn not(self) -> Not<T> {
         Not(self.0)
     }

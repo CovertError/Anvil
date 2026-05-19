@@ -111,6 +111,7 @@ pub struct PropertyWrite {
 }
 
 /// Per-call context carried through action dispatch.
+#[derive(Default)]
 pub struct Ctx {
     pub container: Option<anvil_core::Container>,
     pub dispatched: Vec<BrowserDispatch>,
@@ -118,19 +119,6 @@ pub struct Ctx {
     pub redirect: Option<String>,
     pub errors: HashMap<String, Vec<String>>,
     pub island: Option<String>,
-}
-
-impl Default for Ctx {
-    fn default() -> Self {
-        Self {
-            container: None,
-            dispatched: Vec::new(),
-            emitted: Vec::new(),
-            redirect: None,
-            errors: HashMap::new(),
-            island: None,
-        }
-    }
 }
 
 impl Ctx {

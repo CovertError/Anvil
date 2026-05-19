@@ -352,14 +352,14 @@ fn json_contains(actual: &serde_json::Value, expected: &serde_json::Value) -> bo
     match (actual, expected) {
         (Object(a), Object(e)) => e
             .iter()
-            .all(|(k, ev)| a.get(k).map_or(false, |av| json_contains(av, ev))),
+            .all(|(k, ev)| a.get(k).is_some_and(|av| json_contains(av, ev))),
         (Array(a), Array(e)) => e.iter().all(|ev| a.iter().any(|av| json_contains(av, ev))),
         (a, e) => a == e,
     }
 }
 
 /// Dot-path lookup: `"data.user.0.name"` walks objects and arrays.
-fn json_dig<'a>(v: &'a serde_json::Value, path: &str) -> Option<serde_json::Value> {
+fn json_dig(v: &serde_json::Value, path: &str) -> Option<serde_json::Value> {
     let mut current = v;
     for segment in path.split('.') {
         current = if let Ok(idx) = segment.parse::<usize>() {

@@ -207,7 +207,7 @@ impl Seeder for CountSeeder {
                     .bind(true)
                     .execute(sqlite)
                     .await
-                    .map_err(|e| anvilforge::Error::Database(e))?;
+                    .map_err(anvilforge::Error::Database)?;
             }
         }
         Ok(())

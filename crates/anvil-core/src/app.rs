@@ -120,8 +120,8 @@ impl ApplicationBuilder {
         Application {
             container,
             registry,
-            web: web_router.unwrap_or_else(AxumRouter::new),
-            api: api_router.unwrap_or_else(AxumRouter::new),
+            web: web_router.unwrap_or_default(),
+            api: api_router.unwrap_or_default(),
             shutdown: ShutdownHandle::new(),
             server_config,
             routes: all_routes,

@@ -55,17 +55,22 @@ pub struct ComponentEntry {
 
 inventory::collect!(ComponentEntry);
 
+/// Type-erased dispatch function: invoked by the runtime to forward an action
+/// call into the user's `async fn` on the component. The lifetime contract
+/// ties the returned future to the borrowed component, method name, and ctx.
+pub type DispatchFn = for<'a> fn(
+    component: &'a mut (dyn std::any::Any + Send + Sync),
+    method: &'a str,
+    args: Vec<serde_json::Value>,
+    ctx: &'a mut crate::component::Ctx,
+) -> Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>>;
+
 /// Dispatch table entry — submitted by `#[spark_actions]`. Each component class
 /// has at most one. The dispatch function downcasts the type-erased component
 /// reference and matches the method name to the user's `fn`s.
 pub struct DispatchEntry {
     pub class: &'static str,
-    pub dispatch: for<'a> fn(
-        component: &'a mut (dyn std::any::Any + Send + Sync),
-        method: &'a str,
-        args: Vec<serde_json::Value>,
-        ctx: &'a mut crate::component::Ctx,
-    ) -> Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>>,
+    pub dispatch: DispatchFn,
 }
 
 inventory::collect!(DispatchEntry);

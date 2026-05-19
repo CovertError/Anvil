@@ -106,7 +106,7 @@ pub struct Table {
     name: String,
     mode: TableMode,
     driver: Driver,
-    columns: Vec<Box<ColumnDef>>,
+    columns: Vec<ColumnDef>,
     indexes: Vec<String>,
     foreign_keys: Vec<String>,
     drops: Vec<String>,
@@ -131,13 +131,12 @@ impl Table {
 
     fn push_column(&mut self, name: &str, ty: ColumnType) -> &mut ColumnDef {
         let sea_def = SeaColumnDef::new_with_type(sea_query::Alias::new(name), ty);
-        let boxed = Box::new(ColumnDef {
+        self.columns.push(ColumnDef {
             sea_def,
             name: name.to_string(),
             mode: self.mode,
         });
-        self.columns.push(boxed);
-        self.columns.last_mut().unwrap().as_mut()
+        self.columns.last_mut().unwrap()
     }
 
     // ── identifier ───────────────────────────────────────────────────────────
@@ -507,7 +506,7 @@ impl Table {
                 let mut t = SeaTable::create();
                 t.table(sea_query::Alias::new(&self.name)).if_not_exists();
                 for col in &self.columns {
-                    t.col(&mut col.sea_def.clone());
+                    t.col(col.sea_def.clone());
                 }
                 out.push(build_per_driver(&t, self.driver));
             }
@@ -516,7 +515,7 @@ impl Table {
                 for col in &self.columns {
                     let mut t = SeaTable::alter();
                     t.table(sea_query::Alias::new(&self.name));
-                    t.add_column(&mut col.sea_def.clone());
+                    t.add_column(col.sea_def.clone());
                     out.push(build_alter_per_driver(&t, self.driver));
                 }
             }

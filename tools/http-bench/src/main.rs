@@ -106,8 +106,10 @@ async fn build_app() -> (Application, u16) {
     let port = listener.local_addr().expect("local_addr").port();
     drop(listener);
 
-    let mut cfg = ServerConfig::default();
-    cfg.bind = format!("127.0.0.1:{port}");
+    let cfg = ServerConfig {
+        bind: format!("127.0.0.1:{port}"),
+        ..ServerConfig::default()
+    };
 
     let app = Application::builder()
         .container(move |b| b.driver_pool(driver_pool))

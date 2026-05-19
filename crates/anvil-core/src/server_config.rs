@@ -200,7 +200,7 @@ fn yes() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RateLimitConfig {
     /// Default per-IP rate (e.g. `"60/minute"`). `None` disables the default rate.
@@ -209,15 +209,6 @@ pub struct RateLimitConfig {
     /// Per-route overrides: `{"POST /login" = "5/minute"}`.
     #[serde(default)]
     pub routes: BTreeMap<String, String>,
-}
-
-impl Default for RateLimitConfig {
-    fn default() -> Self {
-        Self {
-            per_ip: None,
-            routes: BTreeMap::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

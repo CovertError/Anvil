@@ -181,12 +181,10 @@ impl ConnectionConfig {
             .unwrap_or_default();
 
         let driver_str = env::var(format!("{prefix}DRIVER")).unwrap_or_else(|_| {
-            // Infer from URL scheme.
-            if url.starts_with("postgres://") || url.starts_with("postgresql://") {
-                "postgres".into()
-            } else {
-                "postgres".into()
-            }
+            // Infer from URL scheme. Currently every supported variant
+            // maps to "postgres"; sqlite/mysql detection lives in cast-core.
+            let _ = url.starts_with("postgres://") || url.starts_with("postgresql://");
+            "postgres".into()
         });
         let driver = match driver_str.as_str() {
             "postgres" | "pgsql" | "pg" => ConnectionDriver::Postgres,

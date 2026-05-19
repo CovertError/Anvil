@@ -322,7 +322,7 @@ where
     pub fn join(mut self, table: &str, left_column: &str, right_column: &str) -> Self {
         self.select.inner_join(
             sea_query::Alias::new(table),
-            Expr::cust(&format!("{left_column} = {right_column}")),
+            Expr::cust(format!("{left_column} = {right_column}")),
         );
         self
     }
@@ -331,7 +331,7 @@ where
     pub fn left_join(mut self, table: &str, left_column: &str, right_column: &str) -> Self {
         self.select.left_join(
             sea_query::Alias::new(table),
-            Expr::cust(&format!("{left_column} = {right_column}")),
+            Expr::cust(format!("{left_column} = {right_column}")),
         );
         self
     }
@@ -340,7 +340,7 @@ where
     pub fn right_join(mut self, table: &str, left_column: &str, right_column: &str) -> Self {
         self.select.right_join(
             sea_query::Alias::new(table),
-            Expr::cust(&format!("{left_column} = {right_column}")),
+            Expr::cust(format!("{left_column} = {right_column}")),
         );
         self
     }
@@ -362,7 +362,7 @@ where
 
     /// `GROUP BY raw_sql`.
     pub fn group_by_raw(mut self, raw: impl Into<String>) -> Self {
-        self.select.add_group_by([Expr::cust(&raw.into())]);
+        self.select.add_group_by([Expr::cust(raw)]);
         self
     }
 
@@ -372,7 +372,7 @@ where
     }
 
     pub fn having_raw(mut self, sql: impl Into<String>) -> Self {
-        self.select.and_having(Expr::cust(&sql.into()));
+        self.select.and_having(Expr::cust(sql));
         self
     }
 
@@ -767,7 +767,7 @@ where
     child_select.clear_selects();
     child_select.expr(Expr::cust("1"));
     // Add the correlation predicate.
-    let correlate = Expr::cust(&format!(
+    let correlate = Expr::cust(format!(
         "{child}.{fk} = {parent}.{lk}",
         child = R::Child::TABLE,
         fk = R::foreign_key(),

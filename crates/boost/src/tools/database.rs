@@ -10,6 +10,9 @@ use sqlx::{Column, Row, TypeInfo};
 use crate::protocol::CallToolResult;
 use crate::tool::{Context, Tool};
 
+/// Row schema for `PRAGMA table_info(...)`: (cid, name, type, notnull, dflt_value, pk).
+type SqliteColumnRow = (i64, String, String, i64, Option<String>, i64);
+
 // ─── database-schema ────────────────────────────────────────────────────────
 
 pub struct DatabaseSchema;
@@ -87,7 +90,7 @@ async fn sqlite_schema(p: &sqlx::SqlitePool) -> CallToolResult {
     };
     let mut by_table = serde_json::Map::new();
     for (name,) in tables {
-        let cols: Result<Vec<(i64, String, String, i64, Option<String>, i64)>, _> =
+        let cols: Result<Vec<SqliteColumnRow>, _> =
             sqlx::query_as(&format!("PRAGMA table_info({name})"))
                 .fetch_all(p)
                 .await;
@@ -151,8 +154,7 @@ impl Tool for DatabaseQuery {
             .get("limit")
             .and_then(|v| v.as_u64())
             .unwrap_or(100)
-            .min(1000)
-            .max(1) as usize;
+            .clamp(1, 1000) as usize;
 
         let pool = ctx.container.driver_pool();
         let result = match pool {

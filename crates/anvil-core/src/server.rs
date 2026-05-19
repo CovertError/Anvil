@@ -497,7 +497,7 @@ impl RateLimiter {
 
     fn rule_for(&self, method: &Method, path: &str) -> Option<RateRule> {
         for (key, rule) in &self.route_rules {
-            if key.path == path && key.method.as_ref().map_or(true, |m| m == method) {
+            if key.path == path && key.method.as_ref().is_none_or(|m| m == method) {
                 return Some(*rule);
             }
         }
@@ -892,7 +892,7 @@ impl CompiledProxies {
             })
             .collect();
         // Longest prefix first so `/api/v2/users` beats `/api`.
-        compiled.sort_by(|a, b| b.prefix.len().cmp(&a.prefix.len()));
+        compiled.sort_by_key(|r| std::cmp::Reverse(r.prefix.len()));
 
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())

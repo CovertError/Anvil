@@ -432,10 +432,7 @@ pub fn actions(_args: TokenStream, input: TokenStream) -> TokenStream {
     }
 
     // Build the dispatch function body.
-    let dispatch_arms: Vec<TokenStream2> = action_methods
-        .iter()
-        .map(|m| dispatch_arm_for(&m))
-        .collect();
+    let dispatch_arms: Vec<TokenStream2> = action_methods.iter().map(dispatch_arm_for).collect();
 
     let on_arms: Vec<TokenStream2> = on_methods
         .iter()

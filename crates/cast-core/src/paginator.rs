@@ -25,7 +25,7 @@ impl<T> Paginator<T> {
         let last_page = if total_u == 0 {
             1
         } else {
-            (total_u + per_page - 1) / per_page
+            total_u.div_ceil(per_page)
         };
         Self {
             items,
