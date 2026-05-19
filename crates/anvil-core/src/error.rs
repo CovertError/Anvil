@@ -137,7 +137,10 @@ impl IntoResponse for Error {
             }),
         };
 
-        if matches!(self, Error::Internal(_) | Error::Database(_) | Error::Other(_)) {
+        if matches!(
+            self,
+            Error::Internal(_) | Error::Database(_) | Error::Other(_)
+        ) {
             tracing::error!(error = %self, "internal error response");
         }
 

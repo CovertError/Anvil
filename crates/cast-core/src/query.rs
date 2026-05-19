@@ -15,7 +15,7 @@ use std::marker::PhantomData;
 
 use sea_query::{Expr, Order, PostgresQueryBuilder, Query, SimpleExpr};
 use sea_query_binder::SqlxBinder;
-use sqlx::{FromRow, postgres::PgRow};
+use sqlx::{postgres::PgRow, FromRow};
 
 use crate::column::Column;
 use crate::model::Model;
@@ -79,10 +79,7 @@ where
 
     /// Build a fully-qualified `table.column` expression so joins disambiguate.
     fn col_of(name: &str) -> sea_query::Expr {
-        sea_query::Expr::col((
-            sea_query::Alias::new(M::TABLE),
-            sea_query::Alias::new(name),
-        ))
+        sea_query::Expr::col((sea_query::Alias::new(M::TABLE), sea_query::Alias::new(name)))
     }
 
     fn add_and(mut self, expr: SimpleExpr) -> Self {
@@ -294,10 +291,10 @@ where
     // ── Column comparison ────────────────────────────────────────────────────
 
     pub fn where_column<T>(self, a: Column<M, T>, b: Column<M, T>) -> Self {
-        self.add_and(
-            Self::col_of(a.name())
-                .equals((sea_query::Alias::new(M::TABLE), sea_query::Alias::new(b.name()))),
-        )
+        self.add_and(Self::col_of(a.name()).equals((
+            sea_query::Alias::new(M::TABLE),
+            sea_query::Alias::new(b.name()),
+        )))
     }
 
     // ── Raw escape hatches ───────────────────────────────────────────────────
@@ -350,10 +347,8 @@ where
 
     /// `CROSS JOIN table` (no ON clause).
     pub fn cross_join(mut self, table: &str) -> Self {
-        self.select.cross_join(
-            sea_query::Alias::new(table),
-            Expr::cust("TRUE"),
-        );
+        self.select
+            .cross_join(sea_query::Alias::new(table), Expr::cust("TRUE"));
         self
     }
 
@@ -464,7 +459,9 @@ where
             .take(per_page)
             .get(pool)
             .await?;
-        Ok(crate::paginator::Paginator::new(items, total, per_page, page))
+        Ok(crate::paginator::Paginator::new(
+            items, total, per_page, page,
+        ))
     }
 
     /// Fetch the parent rows along with a related-row count. Mirrors Eloquent's
@@ -495,7 +492,10 @@ where
             parent = M::TABLE,
             lk = R::local_key(),
         );
-        select.expr_as(Expr::cust(&subquery_sql), sea_query::Alias::new(COUNT_ALIAS));
+        select.expr_as(
+            Expr::cust(&subquery_sql),
+            sea_query::Alias::new(COUNT_ALIAS),
+        );
         let (sql, values) = select.build_sqlx(PostgresQueryBuilder);
         let rows = sqlx::query_with(&sql, values).fetch_all(pool).await?;
         let mut out = Vec::with_capacity(rows.len());
@@ -546,7 +546,8 @@ where
     }
 
     pub fn in_random_order(mut self) -> Self {
-        self.select.order_by_expr(Expr::cust("RANDOM()"), Order::Asc);
+        self.select
+            .order_by_expr(Expr::cust("RANDOM()"), Order::Asc);
         self
     }
 
@@ -642,7 +643,11 @@ where
         Ok(rows.into_iter().map(|(v,)| v).collect())
     }
 
-    pub async fn value<T>(self, column: Column<M, T>, pool: &sqlx::PgPool) -> Result<Option<T>, Error>
+    pub async fn value<T>(
+        self,
+        column: Column<M, T>,
+        pool: &sqlx::PgPool,
+    ) -> Result<Option<T>, Error>
     where
         T: for<'r> sqlx::Decode<'r, sqlx::Postgres> + sqlx::Type<sqlx::Postgres> + Send + Unpin,
     {
@@ -651,7 +656,9 @@ where
         select.column(sea_query::Alias::new(column.name()));
         select.limit(1);
         let (sql, values) = select.build_sqlx(PostgresQueryBuilder);
-        let row: Option<(T,)> = sqlx::query_as_with(&sql, values).fetch_optional(pool).await?;
+        let row: Option<(T,)> = sqlx::query_as_with(&sql, values)
+            .fetch_optional(pool)
+            .await?;
         Ok(row.map(|(v,)| v))
     }
 
@@ -665,22 +672,33 @@ where
     where
         T: for<'r> sqlx::Decode<'r, sqlx::Postgres> + sqlx::Type<sqlx::Postgres> + Send + Unpin,
     {
-        self.aggregate_one_value(pool, &format!("MIN({})", column.name())).await
+        self.aggregate_one_value(pool, &format!("MIN({})", column.name()))
+            .await
     }
 
     pub async fn max<T>(self, column: Column<M, T>, pool: &sqlx::PgPool) -> Result<Option<T>, Error>
     where
         T: for<'r> sqlx::Decode<'r, sqlx::Postgres> + sqlx::Type<sqlx::Postgres> + Send + Unpin,
     {
-        self.aggregate_one_value(pool, &format!("MAX({})", column.name())).await
+        self.aggregate_one_value(pool, &format!("MAX({})", column.name()))
+            .await
     }
 
     pub async fn sum<T>(self, column: Column<M, T>, pool: &sqlx::PgPool) -> Result<i64, Error> {
-        self.aggregate_i64(pool, &format!("COALESCE(SUM({})::BIGINT, 0)", column.name())).await
+        self.aggregate_i64(
+            pool,
+            &format!("COALESCE(SUM({})::BIGINT, 0)", column.name()),
+        )
+        .await
     }
 
-    pub async fn avg<T>(self, column: Column<M, T>, pool: &sqlx::PgPool) -> Result<Option<f64>, Error> {
-        self.aggregate_one_value(pool, &format!("AVG({})::float8", column.name())).await
+    pub async fn avg<T>(
+        self,
+        column: Column<M, T>,
+        pool: &sqlx::PgPool,
+    ) -> Result<Option<f64>, Error> {
+        self.aggregate_one_value(pool, &format!("AVG({})::float8", column.name()))
+            .await
     }
 
     pub async fn exists(self, pool: &sqlx::PgPool) -> Result<bool, Error> {
@@ -707,7 +725,11 @@ where
         Ok(v)
     }
 
-    async fn aggregate_one_value<T>(self, pool: &sqlx::PgPool, expr: &str) -> Result<Option<T>, Error>
+    async fn aggregate_one_value<T>(
+        self,
+        pool: &sqlx::PgPool,
+        expr: &str,
+    ) -> Result<Option<T>, Error>
     where
         T: for<'r> sqlx::Decode<'r, sqlx::Postgres> + sqlx::Type<sqlx::Postgres> + Send + Unpin,
     {
@@ -718,7 +740,9 @@ where
         q.reset_offset();
         q.expr(Expr::cust(expr));
         let (sql, values) = q.build_sqlx(PostgresQueryBuilder);
-        let row: Option<(Option<T>,)> = sqlx::query_as_with(&sql, values).fetch_optional(pool).await?;
+        let row: Option<(Option<T>,)> = sqlx::query_as_with(&sql, values)
+            .fetch_optional(pool)
+            .await?;
         Ok(row.and_then(|(v,)| v))
     }
 }

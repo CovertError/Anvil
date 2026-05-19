@@ -23,11 +23,17 @@ impl Tool for ListAvailableCommands {
         let commands = [
             ("new", "Scaffold a new Anvil project"),
             ("serve", "Run the development server"),
-            ("dev", "`serve --watch` shorthand (auto-reload on file changes)"),
+            (
+                "dev",
+                "`serve --watch` shorthand (auto-reload on file changes)",
+            ),
             ("routes", "List every route registered by the app"),
             ("migrate", "Run pending database migrations"),
             ("migrate:rollback", "Roll back the last batch of migrations"),
-            ("migrate:fresh", "Drop the whole schema and re-run all migrations"),
+            (
+                "migrate:fresh",
+                "Drop the whole schema and re-run all migrations",
+            ),
             ("migrate:status", "Show which migrations have been applied"),
             ("db:seed", "Run database seeders"),
             ("db:wipe", "Wipe all tables in the default database"),
@@ -37,7 +43,10 @@ impl Tool for ListAvailableCommands {
             ("repl", "Open a REPL with the app context loaded"),
             ("make:model", "Generate a model + optional migration"),
             ("make:migration", "Generate a migration"),
-            ("make:controller", "Generate a controller (optionally resource-style)"),
+            (
+                "make:controller",
+                "Generate a controller (optionally resource-style)",
+            ),
             ("make:request", "Generate a form-request validator"),
             ("make:job", "Generate a queued job"),
             ("make:event", "Generate an event payload"),

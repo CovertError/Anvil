@@ -20,9 +20,9 @@
 //! ```
 
 pub mod client;
+pub mod datasets;
 pub mod expect;
 pub mod factory;
-pub mod datasets;
 
 #[cfg(feature = "browser")]
 pub mod browser;
@@ -38,8 +38,8 @@ pub use paste;
 /// The Pest-style prelude. `use anvilforge::assay::*;` or
 /// `use anvil_test::assay::*;` to bring in the testing surface.
 pub mod assay {
-    pub use crate::{expect, Expect, Factory, Not, TestClient, TestResponse};
     pub use crate::{dataset, dataset_async};
+    pub use crate::{expect, Expect, Factory, Not, TestClient, TestResponse};
     pub use serde_json::json;
 
     #[cfg(feature = "browser")]

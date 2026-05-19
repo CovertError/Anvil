@@ -78,11 +78,7 @@ where
     /// Fetch all rows.
     fn all(pool: &sqlx::PgPool) -> futures::future::BoxFuture<'_, Result<Vec<Self>, Error>> {
         Box::pin(async move {
-            let sql = format!(
-                "SELECT {} FROM {}",
-                Self::COLUMNS.join(", "),
-                Self::TABLE
-            );
+            let sql = format!("SELECT {} FROM {}", Self::COLUMNS.join(", "), Self::TABLE);
             let rows = sqlx::query_as::<_, Self>(&sql).fetch_all(pool).await?;
             Ok(rows)
         })

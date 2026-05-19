@@ -76,8 +76,7 @@ impl IntoResponse for Redirect {
         let mut headers = HeaderMap::new();
         headers.insert(
             axum::http::header::LOCATION,
-            HeaderValue::from_str(&self.location)
-                .unwrap_or_else(|_| HeaderValue::from_static("/")),
+            HeaderValue::from_str(&self.location).unwrap_or_else(|_| HeaderValue::from_static("/")),
         );
         (self.status, headers).into_response()
     }

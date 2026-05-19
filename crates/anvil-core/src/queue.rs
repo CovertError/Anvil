@@ -27,8 +27,7 @@ pub type JobRunner = Arc<
     dyn for<'a> Fn(
             &'a Container,
             &'a QueuePayload,
-        )
-            -> futures::future::BoxFuture<'a, Result<(), Error>>
+        ) -> futures::future::BoxFuture<'a, Result<(), Error>>
         + Send
         + Sync,
 >;
@@ -44,8 +43,7 @@ impl JobRegistry {
         F: for<'a> Fn(
                 &'a Container,
                 &'a QueuePayload,
-            )
-                -> futures::future::BoxFuture<'a, Result<(), Error>>
+            ) -> futures::future::BoxFuture<'a, Result<(), Error>>
             + Send
             + Sync
             + 'static,
@@ -69,7 +67,10 @@ pub fn collect_inventory_registry() -> JobRegistry {
     let registry = JobRegistry::default();
     for reg in inventory::iter::<JobRegistration> {
         let runner = (reg.runner)();
-        registry.runners.write().insert(reg.name.to_string(), runner);
+        registry
+            .runners
+            .write()
+            .insert(reg.name.to_string(), runner);
     }
     registry
 }
@@ -222,14 +223,16 @@ impl QueueDriver for DatabaseDriver {
         .bind(queue)
         .fetch_optional(&self.pool)
         .await?;
-        Ok(row.map(|(id, job_type, data, attempts, max_attempts, queue)| QueuePayload {
-            id,
-            job_type,
-            data,
-            attempts,
-            max_attempts,
-            queue,
-        }))
+        Ok(row.map(
+            |(id, job_type, data, attempts, max_attempts, queue)| QueuePayload {
+                id,
+                job_type,
+                data,
+                attempts,
+                max_attempts,
+                queue,
+            },
+        ))
     }
 
     async fn fail(&self, payload: QueuePayload, error: String) -> Result<(), Error> {
@@ -293,7 +296,8 @@ pub async fn run_worker(
                 if payload_mut.attempts >= payload_mut.max_attempts {
                     handle.fail(payload_mut, e.to_string()).await?;
                 } else {
-                    let backoff = Duration::from_secs(2u64.pow(payload_mut.attempts as u32).min(60));
+                    let backoff =
+                        Duration::from_secs(2u64.pow(payload_mut.attempts as u32).min(60));
                     tokio::time::sleep(backoff).await;
                     handle.push(payload_mut).await?;
                 }

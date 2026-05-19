@@ -64,12 +64,7 @@ impl CacheStore {
     }
 
     /// `remember` — get from cache, or compute, store, and return.
-    pub async fn remember<T, F, Fut>(
-        &self,
-        key: &str,
-        ttl: Duration,
-        loader: F,
-    ) -> Result<T, Error>
+    pub async fn remember<T, F, Fut>(&self, key: &str, ttl: Duration, loader: F) -> Result<T, Error>
     where
         T: Serialize + DeserializeOwned + Send + Sync,
         F: FnOnce() -> Fut + Send,

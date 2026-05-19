@@ -48,10 +48,10 @@ pub mod response;
 pub mod snapshot;
 pub mod template;
 
-pub use error::{Error, Result};
-pub use install::{install, install_routes, ensure_bellows_bound};
 pub use broadcast::{broadcast, SparkBroadcast};
 pub use component::{Component, Ctx, MountProps, PropertyWrite};
+pub use error::{Error, Result};
+pub use install::{ensure_bellows_bound, install, install_routes};
 pub use registry::{BoxedComponent, ComponentEntry, DynComponent};
 pub use render::{boot_script, render_mount};
 

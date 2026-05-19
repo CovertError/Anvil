@@ -8,33 +8,22 @@
 //! - Multi-connection registry holding SQLite + (optional) Postgres simultaneously
 //! - Raw sqlx queries against SQLite via `Pool::as_sqlite()`
 
-use anvilforge::cast::{self, Driver, MigrationRunner, Schema};
 use anvil_core::seeder::{Seeder, SeederRegistry};
 use anvilforge::async_trait::async_trait;
+use anvilforge::cast::{self, Driver, MigrationRunner, Schema};
 
 async fn sqlite_pool() -> cast::Pool {
-    let path = std::env::temp_dir().join(format!(
-        "anvilforge-sqlite-{}.db",
-        std::process::id()
-    ));
+    let path = std::env::temp_dir().join(format!("anvilforge-sqlite-{}.db", std::process::id()));
     let _ = std::fs::remove_file(&path); // start fresh each test run
     let url = format!("sqlite:{}", path.display());
-    cast::connect(&url, 5)
-        .await
-        .expect("connect sqlite")
+    cast::connect(&url, 5).await.expect("connect sqlite")
 }
 
 #[tokio::test]
 async fn driver_detection_recognizes_sqlite_url() {
     assert_eq!(Driver::from_url("sqlite:foo.db").unwrap(), Driver::Sqlite);
-    assert_eq!(
-        Driver::from_url("sqlite::memory:").unwrap(),
-        Driver::Sqlite
-    );
-    assert_eq!(
-        Driver::from_url("postgres://x").unwrap(),
-        Driver::Postgres
-    );
+    assert_eq!(Driver::from_url("sqlite::memory:").unwrap(), Driver::Sqlite);
+    assert_eq!(Driver::from_url("postgres://x").unwrap(), Driver::Postgres);
     assert_eq!(Driver::from_url("mysql://x").unwrap(), Driver::MySql);
     assert!(Driver::from_url("http://nope").is_err());
 }
@@ -69,10 +58,8 @@ impl cast::Migration for CreateUsersTableSqlite {
 #[tokio::test]
 async fn sqlite_migrations_run_and_status_works() {
     let pool = sqlite_pool().await;
-    let runner = MigrationRunner::with_migrations(
-        pool.clone(),
-        vec![Box::new(CreateUsersTableSqlite)],
-    );
+    let runner =
+        MigrationRunner::with_migrations(pool.clone(), vec![Box::new(CreateUsersTableSqlite)]);
 
     // run_up creates the users table + records it in `migrations`.
     let applied = runner.run_up().await.expect("run_up");
@@ -83,12 +70,11 @@ async fn sqlite_migrations_run_and_status_works() {
     assert!(status.iter().any(|s| s.applied && s.name.contains("users")));
 
     // The table actually exists.
-    let count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='users'",
-    )
-    .fetch_one(pool.as_sqlite().unwrap())
-    .await
-    .unwrap();
+    let count: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='users'")
+            .fetch_one(pool.as_sqlite().unwrap())
+            .await
+            .unwrap();
     assert_eq!(count.0, 1);
 
     // Insert + read back a row using raw sqlx against the SQLite pool.
@@ -110,12 +96,11 @@ async fn sqlite_migrations_run_and_status_works() {
     // Rollback should drop the users table.
     let rolled = runner.rollback().await.expect("rollback");
     assert_eq!(rolled.len(), 1);
-    let count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='users'",
-    )
-    .fetch_one(pool.as_sqlite().unwrap())
-    .await
-    .unwrap();
+    let count: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='users'")
+            .fetch_one(pool.as_sqlite().unwrap())
+            .await
+            .unwrap();
     assert_eq!(count.0, 0, "users table should be gone after rollback");
 }
 
@@ -140,10 +125,8 @@ async fn sqlite_schema_builder_emits_sqlite_dialect() {
 #[tokio::test]
 async fn sqlite_fresh_drops_all_tables_then_remigrates() {
     let pool = sqlite_pool().await;
-    let runner = MigrationRunner::with_migrations(
-        pool.clone(),
-        vec![Box::new(CreateUsersTableSqlite)],
-    );
+    let runner =
+        MigrationRunner::with_migrations(pool.clone(), vec![Box::new(CreateUsersTableSqlite)]);
 
     runner.run_up().await.unwrap();
     sqlx::query("CREATE TABLE strays (id INTEGER PRIMARY KEY)")
@@ -154,20 +137,18 @@ async fn sqlite_fresh_drops_all_tables_then_remigrates() {
     runner.fresh().await.expect("fresh");
 
     // `strays` should be gone; `users` should exist (re-migrated).
-    let strays: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='strays'",
-    )
-    .fetch_one(pool.as_sqlite().unwrap())
-    .await
-    .unwrap();
+    let strays: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='strays'")
+            .fetch_one(pool.as_sqlite().unwrap())
+            .await
+            .unwrap();
     assert_eq!(strays.0, 0, "fresh should drop stray tables");
 
-    let users: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='users'",
-    )
-    .fetch_one(pool.as_sqlite().unwrap())
-    .await
-    .unwrap();
+    let users: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='users'")
+            .fetch_one(pool.as_sqlite().unwrap())
+            .await
+            .unwrap();
     assert_eq!(users.0, 1, "fresh should re-migrate users");
 }
 

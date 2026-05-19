@@ -11,7 +11,9 @@ pub fn install(force: bool) -> Result<()> {
     if force {
         cmd.arg("--force");
     }
-    let status = cmd.status().context("failed to spawn cargo for boost:install")?;
+    let status = cmd
+        .status()
+        .context("failed to spawn cargo for boost:install")?;
     if !status.success() {
         anyhow::bail!("boost:install exited with {status}");
     }

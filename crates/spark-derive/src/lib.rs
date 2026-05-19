@@ -31,8 +31,7 @@ struct ComponentArgs {
 
 impl Parse for ComponentArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let pairs: Punctuated<MetaNameValue, Token![,]> =
-            Punctuated::parse_terminated(input)?;
+        let pairs: Punctuated<MetaNameValue, Token![,]> = Punctuated::parse_terminated(input)?;
         let mut template = None;
         for nv in pairs {
             if nv.path.is_ident("template") {
@@ -44,9 +43,8 @@ impl Parse for ComponentArgs {
             }
         }
         Ok(ComponentArgs {
-            template: template.ok_or_else(|| {
-                syn::Error::new(input.span(), "expected `template = \"...\"`")
-            })?,
+            template: template
+                .ok_or_else(|| syn::Error::new(input.span(), "expected `template = \"...\"`"))?,
         })
     }
 }
@@ -104,9 +102,7 @@ pub fn component(args: TokenStream, input: TokenStream) -> TokenStream {
     let needed_derives = needed_derives(&input.attrs);
     if !needed_derives.is_empty() {
         let combined: TokenStream2 = needed_derives.iter().map(|p| quote!(#p,)).collect();
-        input
-            .attrs
-            .push(parse_quote!(#[derive(#combined)]));
+        input.attrs.push(parse_quote!(#[derive(#combined)]));
     }
 
     let _ = data_fields;

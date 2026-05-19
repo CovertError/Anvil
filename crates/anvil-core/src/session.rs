@@ -1,7 +1,7 @@
 //! Session subsystem. Thin wrapper around tower-sessions.
 
-pub use tower_sessions::{Session, SessionManagerLayer, MemoryStore};
 pub use tower_sessions::cookie::SameSite;
+pub use tower_sessions::{MemoryStore, Session, SessionManagerLayer};
 
 use crate::config::SessionConfig;
 
@@ -24,7 +24,11 @@ pub const FLASH_KEY: &str = "_flash";
 pub const ERRORS_KEY: &str = "_errors";
 
 /// Insert a flash message — read by the next request, then cleared.
-pub async fn flash(session: &Session, key: &str, value: serde_json::Value) -> Result<(), crate::Error> {
+pub async fn flash(
+    session: &Session,
+    key: &str,
+    value: serde_json::Value,
+) -> Result<(), crate::Error> {
     let mut flashes: std::collections::HashMap<String, serde_json::Value> = session
         .get(FLASH_KEY)
         .await
@@ -38,7 +42,10 @@ pub async fn flash(session: &Session, key: &str, value: serde_json::Value) -> Re
     Ok(())
 }
 
-pub async fn take_flash(session: &Session, key: &str) -> Result<Option<serde_json::Value>, crate::Error> {
+pub async fn take_flash(
+    session: &Session,
+    key: &str,
+) -> Result<Option<serde_json::Value>, crate::Error> {
     let mut flashes: std::collections::HashMap<String, serde_json::Value> = session
         .get(FLASH_KEY)
         .await

@@ -18,8 +18,11 @@ pub trait Listener<E: Event>: Send + Sync + 'static {
     async fn handle(&self, event: &E) -> Result<(), Error>;
 }
 
-type DynListener =
-    Arc<dyn Fn(&(dyn Any + Send + Sync)) -> futures::future::BoxFuture<'static, Result<(), Error>> + Send + Sync>;
+type DynListener = Arc<
+    dyn Fn(&(dyn Any + Send + Sync)) -> futures::future::BoxFuture<'static, Result<(), Error>>
+        + Send
+        + Sync,
+>;
 
 #[derive(Default, Clone)]
 pub struct EventBus {

@@ -84,7 +84,10 @@ fn render_source_handles_bare_spark_call_without_props() {
 
     let source = r#"<div>@spark("TemplateTestCounter")</div>"#;
     let html = spark::template::render_source(source, &serde_json::json!({})).unwrap();
-    assert!(html.contains("count: 0"), "default mount() should yield count=0: {html}");
+    assert!(
+        html.contains("count: 0"),
+        "default mount() should yield count=0: {html}"
+    );
 }
 
 #[test]

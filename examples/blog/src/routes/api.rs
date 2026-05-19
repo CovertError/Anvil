@@ -19,10 +19,7 @@ async fn list_posts(State(c): State<Container>) -> Result<Json<Vec<Post>>> {
     Ok(Json(Post::all(c.pool()).await?))
 }
 
-async fn create_post(
-    State(c): State<Container>,
-    payload: StorePostRequest,
-) -> Result<Json<Post>> {
+async fn create_post(State(c): State<Container>, payload: StorePostRequest) -> Result<Json<Post>> {
     let row: (i64,) = sqlx::query_as(
         "INSERT INTO posts (author_id, title, body, published) VALUES ($1, $2, $3, $4) RETURNING id",
     )

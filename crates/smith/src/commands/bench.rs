@@ -8,12 +8,7 @@ use anyhow::{Context, Result};
 use std::process::Command;
 
 /// `anvil bench` — invokes the in-workspace HTTP load tester.
-pub fn http(
-    concurrency: usize,
-    seconds: u64,
-    warmup_seconds: u64,
-    endpoint: &str,
-) -> Result<()> {
+pub fn http(concurrency: usize, seconds: u64, warmup_seconds: u64, endpoint: &str) -> Result<()> {
     println!(
         "─── HTTP load test ───  concurrency={concurrency}  seconds={seconds}  warmup={warmup_seconds}s  endpoint={endpoint}"
     );

@@ -102,7 +102,9 @@ impl Server {
         let result = InitializeResult {
             protocol_version: PROTOCOL_VERSION,
             capabilities: ServerCapabilities {
-                tools: ToolsCapability { list_changed: false },
+                tools: ToolsCapability {
+                    list_changed: false,
+                },
             },
             server_info: ServerInfo {
                 name: "anvilforge-boost",

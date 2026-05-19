@@ -21,7 +21,10 @@ pub trait Notification: Send + Sync {
         Ok(None)
     }
 
-    async fn to_database(&self, _container: &Container) -> Result<Option<serde_json::Value>, Error> {
+    async fn to_database(
+        &self,
+        _container: &Container,
+    ) -> Result<Option<serde_json::Value>, Error> {
         Ok(None)
     }
 
@@ -36,10 +39,7 @@ pub struct SlackMessage {
     pub text: String,
 }
 
-pub async fn notify<N: Notification>(
-    container: &Container,
-    notification: &N,
-) -> Result<(), Error> {
+pub async fn notify<N: Notification>(container: &Container, notification: &N) -> Result<(), Error> {
     for channel in notification.channels() {
         match channel {
             Channel::Mail => {
@@ -49,7 +49,10 @@ pub async fn notify<N: Notification>(
             }
             Channel::Database => {
                 if let Some(payload) = notification.to_database(container).await? {
-                    tracing::info!(?payload, "notification stored in database channel (POC stub)");
+                    tracing::info!(
+                        ?payload,
+                        "notification stored in database channel (POC stub)"
+                    );
                 }
             }
             Channel::Slack => {

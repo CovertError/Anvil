@@ -57,8 +57,8 @@ impl MailerHandle {
     }
 
     pub fn smtp(config: &MailConfig) -> Result<Self, Error> {
-        let mut builder = AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&config.host)
-            .port(config.port);
+        let mut builder =
+            AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&config.host).port(config.port);
         if !config.username.is_empty() {
             builder = builder.credentials(Credentials::new(
                 config.username.clone(),
@@ -85,7 +85,11 @@ pub trait Mailable: Send + Sync {
     async fn build(&self) -> Result<OutgoingMessage, Error>;
 }
 
-pub async fn to(addr: impl Into<String>, mailer: &MailerHandle, mailable: impl Mailable) -> Result<(), Error> {
+pub async fn to(
+    addr: impl Into<String>,
+    mailer: &MailerHandle,
+    mailable: impl Mailable,
+) -> Result<(), Error> {
     let mut msg = mailable.build().await?;
     msg.to.push(addr.into());
     mailer.send(msg).await
@@ -127,16 +131,25 @@ impl MailDriver for SmtpDriver {
             message.from.clone()
         };
 
-        let mut builder = Message::builder()
-            .from(from.parse().map_err(|e: lettre::address::AddressError| Error::Mail(e.to_string()))?);
+        let mut builder = Message::builder().from(
+            from.parse()
+                .map_err(|e: lettre::address::AddressError| Error::Mail(e.to_string()))?,
+        );
         for to in &message.to {
-            builder = builder.to(to.parse().map_err(|e: lettre::address::AddressError| Error::Mail(e.to_string()))?);
+            builder = builder.to(to
+                .parse()
+                .map_err(|e: lettre::address::AddressError| Error::Mail(e.to_string()))?);
         }
         for cc in &message.cc {
-            builder = builder.cc(cc.parse().map_err(|e: lettre::address::AddressError| Error::Mail(e.to_string()))?);
+            builder = builder.cc(cc
+                .parse()
+                .map_err(|e: lettre::address::AddressError| Error::Mail(e.to_string()))?);
         }
         for bcc in &message.bcc {
-            builder = builder.bcc(bcc.parse().map_err(|e: lettre::address::AddressError| Error::Mail(e.to_string()))?);
+            builder = builder.bcc(
+                bcc.parse()
+                    .map_err(|e: lettre::address::AddressError| Error::Mail(e.to_string()))?,
+            );
         }
         let builder = builder.subject(&message.subject);
 

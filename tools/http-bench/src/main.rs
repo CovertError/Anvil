@@ -243,7 +243,11 @@ async fn run_load(
         p50: percentile(&lats, 0.50),
         p95: percentile(&lats, 0.95),
         p99: percentile(&lats, 0.99),
-        max: lats.last().copied().map(Duration::from_nanos).unwrap_or_default(),
+        max: lats
+            .last()
+            .copied()
+            .map(Duration::from_nanos)
+            .unwrap_or_default(),
     }
 }
 

@@ -12,7 +12,7 @@
 
 use std::sync::Once;
 
-use anvilforge::cast::{self, Model, MigrationRunner};
+use anvilforge::cast::{self, MigrationRunner, Model};
 use blog::app::migrations;
 use blog::app::models::{Author, Post};
 
@@ -58,7 +58,10 @@ async fn migrations_apply_and_rollback() {
 
     let runner = MigrationRunner::with_migrations(pool.clone(), migrations::all());
     let applied = runner.run_up().await.expect("migrations up failed");
-    assert!(applied.len() >= 2, "expected ≥2 migrations to run, got {applied:?}");
+    assert!(
+        applied.len() >= 2,
+        "expected ≥2 migrations to run, got {applied:?}"
+    );
 
     // Check that the tables exist.
     let count: (i64,) = sqlx::query_as(
@@ -112,16 +115,14 @@ async fn cast_basic_crud_round_trip() {
     assert_eq!(by_email[0].id, author_id);
 
     // Insert a related post.
-    sqlx::query(
-        "INSERT INTO posts (author_id, title, body, published) VALUES ($1, $2, $3, $4)",
-    )
-    .bind(author_id)
-    .bind("Hello")
-    .bind("World")
-    .bind(true)
-    .execute(pg(&pool))
-    .await
-    .unwrap();
+    sqlx::query("INSERT INTO posts (author_id, title, body, published) VALUES ($1, $2, $3, $4)")
+        .bind(author_id)
+        .bind("Hello")
+        .bind("World")
+        .bind(true)
+        .execute(pg(&pool))
+        .await
+        .unwrap();
 
     // Fetch via has_many.
     let posts = author.posts(pg(&pool)).await.expect("posts");
@@ -130,7 +131,11 @@ async fn cast_basic_crud_round_trip() {
 
     // Belongs_to from the post side.
     let post = posts.into_iter().next().unwrap();
-    let parent = post.author(pg(&pool)).await.expect("author").expect("exists");
+    let parent = post
+        .author(pg(&pool))
+        .await
+        .expect("author")
+        .expect("exists");
     assert_eq!(parent.id, author_id);
 }
 
@@ -283,9 +288,18 @@ async fn seed_three_authors(pool: &cast::Pool) -> Vec<i64> {
     let runner = MigrationRunner::with_migrations(pool.clone(), migrations::all());
     runner.run_up().await.unwrap();
     let mut ids = Vec::new();
-    for (n, e) in [("Ada", "ada@x.com"), ("Bob", "bob@x.com"), ("Cleo", "cleo@x.com")] {
-        let (id,): (i64,) = sqlx::query_as("INSERT INTO authors (name, email) VALUES ($1, $2) RETURNING id")
-            .bind(n).bind(e).fetch_one(pg(pool)).await.unwrap();
+    for (n, e) in [
+        ("Ada", "ada@x.com"),
+        ("Bob", "bob@x.com"),
+        ("Cleo", "cleo@x.com"),
+    ] {
+        let (id,): (i64,) =
+            sqlx::query_as("INSERT INTO authors (name, email) VALUES ($1, $2) RETURNING id")
+                .bind(n)
+                .bind(e)
+                .fetch_one(pg(pool))
+                .await
+                .unwrap();
         ids.push(id);
     }
     ids
@@ -300,7 +314,9 @@ async fn where_in_filters_by_id_list() {
 
     let by_ids: Vec<Author> = Author::query()
         .where_in(Author::columns().id(), vec![ids[0], ids[2]])
-        .get(pg(&pool)).await.unwrap();
+        .get(pg(&pool))
+        .await
+        .unwrap();
     assert_eq!(by_ids.len(), 2);
 }
 
@@ -313,7 +329,9 @@ async fn where_not_in_excludes_listed_ids() {
 
     let excluded: Vec<Author> = Author::query()
         .where_not_in(Author::columns().id(), vec![ids[0]])
-        .get(pg(&pool)).await.unwrap();
+        .get(pg(&pool))
+        .await
+        .unwrap();
     assert_eq!(excluded.len(), 2);
 }
 
@@ -326,7 +344,9 @@ async fn where_like_pattern_match() {
 
     let matched: Vec<Author> = Author::query()
         .where_like(Author::columns().name(), "A%")
-        .get(pg(&pool)).await.unwrap();
+        .get(pg(&pool))
+        .await
+        .unwrap();
     assert_eq!(matched.len(), 1);
     assert_eq!(matched[0].name, "Ada");
 }
@@ -340,7 +360,9 @@ async fn where_between_inclusive_range() {
 
     let between: Vec<Author> = Author::query()
         .where_between(Author::columns().id(), ids[0], ids[1])
-        .get(pg(&pool)).await.unwrap();
+        .get(pg(&pool))
+        .await
+        .unwrap();
     assert_eq!(between.len(), 2);
 }
 
@@ -353,18 +375,30 @@ async fn where_null_and_not_null() {
     runner.run_up().await.unwrap();
     // Insert one author with NULL updated_at and one with a value.
     sqlx::query("INSERT INTO authors (name, email, updated_at) VALUES ($1, $2, NULL)")
-        .bind("Null").bind("null@x.com").execute(pg(&pool)).await.unwrap();
+        .bind("Null")
+        .bind("null@x.com")
+        .execute(pg(&pool))
+        .await
+        .unwrap();
     sqlx::query("INSERT INTO authors (name, email) VALUES ($1, $2)")
-        .bind("Set").bind("set@x.com").execute(pg(&pool)).await.unwrap();
+        .bind("Set")
+        .bind("set@x.com")
+        .execute(pg(&pool))
+        .await
+        .unwrap();
 
     let nulls: i64 = Author::query()
         .where_null(Author::columns().updated_at())
-        .count(pg(&pool)).await.unwrap();
+        .count(pg(&pool))
+        .await
+        .unwrap();
     assert_eq!(nulls, 1);
 
     let set: i64 = Author::query()
         .where_not_null(Author::columns().updated_at())
-        .count(pg(&pool)).await.unwrap();
+        .count(pg(&pool))
+        .await
+        .unwrap();
     assert_eq!(set, 1);
 }
 
@@ -375,16 +409,28 @@ async fn aggregates_min_max_sum_avg() {
     reset_schema(&pool).await;
     let ids = seed_three_authors(&pool).await;
 
-    let min_id: Option<i64> = Author::query().min(Author::columns().id(), pg(&pool)).await.unwrap();
+    let min_id: Option<i64> = Author::query()
+        .min(Author::columns().id(), pg(&pool))
+        .await
+        .unwrap();
     assert_eq!(min_id, Some(ids[0]));
 
-    let max_id: Option<i64> = Author::query().max(Author::columns().id(), pg(&pool)).await.unwrap();
+    let max_id: Option<i64> = Author::query()
+        .max(Author::columns().id(), pg(&pool))
+        .await
+        .unwrap();
     assert_eq!(max_id, Some(ids[2]));
 
-    let sum: i64 = Author::query().sum(Author::columns().id(), pg(&pool)).await.unwrap();
+    let sum: i64 = Author::query()
+        .sum(Author::columns().id(), pg(&pool))
+        .await
+        .unwrap();
     assert_eq!(sum, ids.iter().sum::<i64>());
 
-    let avg: Option<f64> = Author::query().avg(Author::columns().id(), pg(&pool)).await.unwrap();
+    let avg: Option<f64> = Author::query()
+        .avg(Author::columns().id(), pg(&pool))
+        .await
+        .unwrap();
     assert!(avg.is_some());
 }
 
@@ -395,16 +441,16 @@ async fn exists_and_doesnt_exist() {
     reset_schema(&pool).await;
     seed_three_authors(&pool).await;
 
-    assert!(
-        Author::query()
-            .where_eq(Author::columns().email(), "ada@x.com".to_string())
-            .exists(pg(&pool)).await.unwrap()
-    );
-    assert!(
-        Author::query()
-            .where_eq(Author::columns().email(), "missing@x.com".to_string())
-            .doesnt_exist(pg(&pool)).await.unwrap()
-    );
+    assert!(Author::query()
+        .where_eq(Author::columns().email(), "ada@x.com".to_string())
+        .exists(pg(&pool))
+        .await
+        .unwrap());
+    assert!(Author::query()
+        .where_eq(Author::columns().email(), "missing@x.com".to_string())
+        .doesnt_exist(pg(&pool))
+        .await
+        .unwrap());
 }
 
 #[tokio::test]
@@ -420,14 +466,18 @@ async fn latest_and_oldest_order_by_created_at() {
         .latest()
         .order_by_desc(Author::columns().id())
         .take(1)
-        .get(pg(&pool)).await.unwrap();
+        .get(pg(&pool))
+        .await
+        .unwrap();
     assert_eq!(latest[0].name, "Cleo");
 
     let oldest: Vec<Author> = Author::query()
         .oldest()
         .order_by_asc(Author::columns().id())
         .take(1)
-        .get(pg(&pool)).await.unwrap();
+        .get(pg(&pool))
+        .await
+        .unwrap();
     assert_eq!(oldest[0].name, "Ada");
 }
 
@@ -442,7 +492,9 @@ async fn take_and_skip_aliases() {
         .order_by_asc(Author::columns().id())
         .skip(1)
         .take(1)
-        .get(pg(&pool)).await.unwrap();
+        .get(pg(&pool))
+        .await
+        .unwrap();
     assert_eq!(page.len(), 1);
     assert_eq!(page[0].name, "Bob");
 }
@@ -456,7 +508,9 @@ async fn pluck_returns_one_column() {
 
     let names: Vec<String> = Author::query()
         .order_by_asc(Author::columns().id())
-        .pluck(Author::columns().name(), pg(&pool)).await.unwrap();
+        .pluck(Author::columns().name(), pg(&pool))
+        .await
+        .unwrap();
     assert_eq!(names, vec!["Ada".to_string(), "Bob".into(), "Cleo".into()]);
 }
 
@@ -469,7 +523,9 @@ async fn value_returns_first_column_value() {
 
     let first_name: Option<String> = Author::query()
         .order_by_asc(Author::columns().id())
-        .value(Author::columns().name(), pg(&pool)).await.unwrap();
+        .value(Author::columns().name(), pg(&pool))
+        .await
+        .unwrap();
     assert_eq!(first_name, Some("Ada".into()));
 }
 
@@ -482,12 +538,15 @@ async fn first_or_fail_terminal() {
 
     let found = Author::query()
         .where_eq(Author::columns().name(), "Ada".to_string())
-        .first_or_fail(pg(&pool)).await.unwrap();
+        .first_or_fail(pg(&pool))
+        .await
+        .unwrap();
     assert_eq!(found.email, "ada@x.com");
 
     let missing = Author::query()
         .where_eq(Author::columns().name(), "Ghost".to_string())
-        .first_or_fail(pg(&pool)).await;
+        .first_or_fail(pg(&pool))
+        .await;
     assert!(matches!(missing, Err(cast::Error::NotFound)));
 }
 
@@ -498,10 +557,14 @@ async fn find_many_returns_models_in_id_set() {
     reset_schema(&pool).await;
     let ids = seed_three_authors(&pool).await;
 
-    let some: Vec<Author> = Author::find_many(pg(&pool), [ids[0], ids[2]]).await.unwrap();
+    let some: Vec<Author> = Author::find_many(pg(&pool), [ids[0], ids[2]])
+        .await
+        .unwrap();
     assert_eq!(some.len(), 2);
 
-    let none: Vec<Author> = Author::find_many(pg(&pool), Vec::<i64>::new()).await.unwrap();
+    let none: Vec<Author> = Author::find_many(pg(&pool), Vec::<i64>::new())
+        .await
+        .unwrap();
     assert!(none.is_empty());
 }
 
@@ -542,12 +605,21 @@ async fn refresh_reloads_self_from_db() {
     runner.run_up().await.unwrap();
 
     let mut author = Author {
-        id: 0, name: "Original".into(), email: "refresh@x.com".into(),
-        created_at: None, updated_at: None,
-    }.save(pg(&pool)).await.unwrap();
+        id: 0,
+        name: "Original".into(),
+        email: "refresh@x.com".into(),
+        created_at: None,
+        updated_at: None,
+    }
+    .save(pg(&pool))
+    .await
+    .unwrap();
     sqlx::query("UPDATE authors SET name = $1 WHERE id = $2")
-        .bind("ChangedExternally").bind(author.id)
-        .execute(pg(&pool)).await.unwrap();
+        .bind("ChangedExternally")
+        .bind(author.id)
+        .execute(pg(&pool))
+        .await
+        .unwrap();
     assert_eq!(author.name, "Original");
     author.refresh(pg(&pool)).await.unwrap();
     assert_eq!(author.name, "ChangedExternally");
@@ -562,12 +634,21 @@ async fn fresh_returns_new_instance_without_mutating_self() {
     runner.run_up().await.unwrap();
 
     let author = Author {
-        id: 0, name: "Original".into(), email: "fresh@x.com".into(),
-        created_at: None, updated_at: None,
-    }.save(pg(&pool)).await.unwrap();
+        id: 0,
+        name: "Original".into(),
+        email: "fresh@x.com".into(),
+        created_at: None,
+        updated_at: None,
+    }
+    .save(pg(&pool))
+    .await
+    .unwrap();
     sqlx::query("UPDATE authors SET name = $1 WHERE id = $2")
-        .bind("Changed").bind(author.id)
-        .execute(pg(&pool)).await.unwrap();
+        .bind("Changed")
+        .bind(author.id)
+        .execute(pg(&pool))
+        .await
+        .unwrap();
 
     let f = author.fresh(pg(&pool)).await.unwrap().unwrap();
     assert_eq!(f.name, "Changed");
@@ -628,12 +709,20 @@ async fn where_has_filters_by_related_existence() {
     reset_schema(&pool).await;
     let ids = seed_three_authors(&pool).await;
     // Ada and Bob get posts; Cleo gets none.
-    sqlx::query("INSERT INTO posts (author_id, title, body, published) VALUES ($1, 't', 'b', true)")
-        .bind(ids[0])
-        .execute(pg(&pool)).await.unwrap();
-    sqlx::query("INSERT INTO posts (author_id, title, body, published) VALUES ($1, 't', 'b', false)")
-        .bind(ids[1])
-        .execute(pg(&pool)).await.unwrap();
+    sqlx::query(
+        "INSERT INTO posts (author_id, title, body, published) VALUES ($1, 't', 'b', true)",
+    )
+    .bind(ids[0])
+    .execute(pg(&pool))
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO posts (author_id, title, body, published) VALUES ($1, 't', 'b', false)",
+    )
+    .bind(ids[1])
+    .execute(pg(&pool))
+    .await
+    .unwrap();
 
     use blog::app::models::Post;
     // Authors who have at least one PUBLISHED post → just Ada.
@@ -655,11 +744,13 @@ async fn where_doesnt_have_filters_negation() {
     let Some(pool) = pool().await else { return };
     reset_schema(&pool).await;
     let ids = seed_three_authors(&pool).await;
-    sqlx::query("INSERT INTO posts (author_id, title, body, published) VALUES ($1, 't', 'b', true)")
-        .bind(ids[0])
-        .execute(pg(&pool))
-        .await
-        .unwrap();
+    sqlx::query(
+        "INSERT INTO posts (author_id, title, body, published) VALUES ($1, 't', 'b', true)",
+    )
+    .bind(ids[0])
+    .execute(pg(&pool))
+    .await
+    .unwrap();
 
     let no_posts: Vec<Author> = Author::query()
         .where_doesnt_have(Author::posts_rel(), |q| q)
@@ -679,15 +770,21 @@ async fn with_count_of_returns_models_plus_counts() {
     reset_schema(&pool).await;
     let ids = seed_three_authors(&pool).await;
     for _ in 0..3 {
-        sqlx::query("INSERT INTO posts (author_id, title, body, published) VALUES ($1, 't', 'b', true)")
-            .bind(ids[0])
-            .execute(pg(&pool)).await.unwrap();
-    }
-    sqlx::query("INSERT INTO posts (author_id, title, body, published) VALUES ($1, 't', 'b', true)")
-        .bind(ids[1])
+        sqlx::query(
+            "INSERT INTO posts (author_id, title, body, published) VALUES ($1, 't', 'b', true)",
+        )
+        .bind(ids[0])
         .execute(pg(&pool))
         .await
         .unwrap();
+    }
+    sqlx::query(
+        "INSERT INTO posts (author_id, title, body, published) VALUES ($1, 't', 'b', true)",
+    )
+    .bind(ids[1])
+    .execute(pg(&pool))
+    .await
+    .unwrap();
 
     let with_counts: Vec<(Author, i64)> = Author::query()
         .order_by_asc(Author::columns().id())
@@ -699,11 +796,10 @@ async fn with_count_of_returns_models_plus_counts() {
         .iter()
         .map(|(a, n)| (a.name.clone(), *n))
         .collect();
-    assert_eq!(counts, vec![
-        ("Ada".into(), 3),
-        ("Bob".into(), 1),
-        ("Cleo".into(), 0),
-    ]);
+    assert_eq!(
+        counts,
+        vec![("Ada".into(), 3), ("Bob".into(), 1), ("Cleo".into(), 0),]
+    );
 }
 
 // ─── Local scopes via `scopes!` ─────────────────────────────────────────────
@@ -733,10 +829,7 @@ async fn local_scopes_chain_on_query_builder() {
     reset_schema(&pool).await;
     seed_three_authors(&pool).await;
 
-    let result: Vec<Author> = author_scopes_test::build()
-        .get(pg(&pool))
-        .await
-        .unwrap();
+    let result: Vec<Author> = author_scopes_test::build().get(pg(&pool)).await.unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].name, "Ada");
 }
@@ -754,7 +847,9 @@ async fn or_where_eq_unions_predicates() {
         .where_eq(Author::columns().name(), "Ada".to_string())
         .or_where_eq(Author::columns().name(), "Cleo".to_string())
         .order_by_asc(Author::columns().id())
-        .get(pg(&pool)).await.unwrap();
+        .get(pg(&pool))
+        .await
+        .unwrap();
     let names: Vec<_> = found.iter().map(|a| a.name.clone()).collect();
     assert_eq!(names, vec!["Ada".to_string(), "Cleo".into()]);
 }
@@ -769,7 +864,9 @@ async fn or_where_in_unions_with_id_set() {
     let found: Vec<Author> = Author::query()
         .where_eq(Author::columns().name(), "Nobody".to_string())
         .or_where_in(Author::columns().id(), vec![ids[0], ids[1]])
-        .get(pg(&pool)).await.unwrap();
+        .get(pg(&pool))
+        .await
+        .unwrap();
     assert_eq!(found.len(), 2);
 }
 
@@ -781,14 +878,24 @@ async fn or_where_null_unions_with_explicit_null() {
     let runner = MigrationRunner::with_migrations(pool.clone(), migrations::all());
     runner.run_up().await.unwrap();
     sqlx::query("INSERT INTO authors (name, email, updated_at) VALUES ($1, $2, NULL)")
-        .bind("Null").bind("null@x.com").execute(pg(&pool)).await.unwrap();
+        .bind("Null")
+        .bind("null@x.com")
+        .execute(pg(&pool))
+        .await
+        .unwrap();
     sqlx::query("INSERT INTO authors (name, email) VALUES ($1, $2)")
-        .bind("Other").bind("other@x.com").execute(pg(&pool)).await.unwrap();
+        .bind("Other")
+        .bind("other@x.com")
+        .execute(pg(&pool))
+        .await
+        .unwrap();
 
     let n: i64 = Author::query()
         .where_eq(Author::columns().name(), "Nope".to_string())
         .or_where_null(Author::columns().updated_at())
-        .count(pg(&pool)).await.unwrap();
+        .count(pg(&pool))
+        .await
+        .unwrap();
     assert_eq!(n, 1);
 }
 
@@ -801,15 +908,27 @@ async fn join_links_two_tables() {
     reset_schema(&pool).await;
     let ids = seed_three_authors(&pool).await;
     // Ada gets 2 posts, others get none.
-    sqlx::query("INSERT INTO posts (author_id, title, body, published) VALUES ($1, 'Hi', 'body', true)")
-        .bind(ids[0]).execute(pg(&pool)).await.unwrap();
-    sqlx::query("INSERT INTO posts (author_id, title, body, published) VALUES ($1, 'Hi2', 'body', false)")
-        .bind(ids[0]).execute(pg(&pool)).await.unwrap();
+    sqlx::query(
+        "INSERT INTO posts (author_id, title, body, published) VALUES ($1, 'Hi', 'body', true)",
+    )
+    .bind(ids[0])
+    .execute(pg(&pool))
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO posts (author_id, title, body, published) VALUES ($1, 'Hi2', 'body', false)",
+    )
+    .bind(ids[0])
+    .execute(pg(&pool))
+    .await
+    .unwrap();
 
     // INNER JOIN: 1 author × 2 posts = 2 joined rows. Count reflects the join cardinality.
     let joined_rows: i64 = Author::query()
         .join("posts", "authors.id", "posts.author_id")
-        .count(pg(&pool)).await.unwrap();
+        .count(pg(&pool))
+        .await
+        .unwrap();
     assert_eq!(joined_rows, 2);
 }
 
@@ -819,13 +938,20 @@ async fn left_join_keeps_authors_without_posts() {
     let Some(pool) = pool().await else { return };
     reset_schema(&pool).await;
     let ids = seed_three_authors(&pool).await;
-    sqlx::query("INSERT INTO posts (author_id, title, body, published) VALUES ($1, 'Hi', 'body', true)")
-        .bind(ids[0]).execute(pg(&pool)).await.unwrap();
+    sqlx::query(
+        "INSERT INTO posts (author_id, title, body, published) VALUES ($1, 'Hi', 'body', true)",
+    )
+    .bind(ids[0])
+    .execute(pg(&pool))
+    .await
+    .unwrap();
 
     // LEFT JOIN: 1 author with a post + 2 authors with NULL post = 3 rows total.
     let total: i64 = Author::query()
         .left_join("posts", "authors.id", "posts.author_id")
-        .count(pg(&pool)).await.unwrap();
+        .count(pg(&pool))
+        .await
+        .unwrap();
     assert_eq!(total, 3);
 }
 
@@ -839,11 +965,21 @@ async fn group_by_with_having_filters_aggregate() {
     let ids = seed_three_authors(&pool).await;
     // Ada gets 2 posts, Bob gets 1, Cleo gets 0.
     for _ in 0..2 {
-        sqlx::query("INSERT INTO posts (author_id, title, body, published) VALUES ($1, 'a', 'b', true)")
-            .bind(ids[0]).execute(pg(&pool)).await.unwrap();
+        sqlx::query(
+            "INSERT INTO posts (author_id, title, body, published) VALUES ($1, 'a', 'b', true)",
+        )
+        .bind(ids[0])
+        .execute(pg(&pool))
+        .await
+        .unwrap();
     }
-    sqlx::query("INSERT INTO posts (author_id, title, body, published) VALUES ($1, 'a', 'b', true)")
-        .bind(ids[1]).execute(pg(&pool)).await.unwrap();
+    sqlx::query(
+        "INSERT INTO posts (author_id, title, body, published) VALUES ($1, 'a', 'b', true)",
+    )
+    .bind(ids[1])
+    .execute(pg(&pool))
+    .await
+    .unwrap();
 
     // Authors with at least 2 posts. The query groups authors and filters by
     // post count via HAVING. The COUNT(*) terminal then counts the resulting
@@ -865,7 +1001,9 @@ async fn group_by_with_having_filters_aggregate() {
              HAVING COUNT(posts.id) >= 2
          ) sub",
     )
-    .fetch_one(pg(&pool)).await.unwrap();
+    .fetch_one(pg(&pool))
+    .await
+    .unwrap();
     assert_eq!(authors_with_2_plus_posts.0, 1);
 }
 
@@ -888,24 +1026,37 @@ async fn soft_delete_methods_work_on_query() {
             deleted_at TIMESTAMPTZ
         )",
     )
-    .execute(pg(&pool)).await.unwrap();
+    .execute(pg(&pool))
+    .await
+    .unwrap();
 
     for (n, deleted) in [("a", false), ("b", true), ("c", false), ("d", true)] {
         if deleted {
             sqlx::query("INSERT INTO widgets (name, deleted_at) VALUES ($1, NOW())")
-                .bind(n).execute(pg(&pool)).await.unwrap();
+                .bind(n)
+                .execute(pg(&pool))
+                .await
+                .unwrap();
         } else {
             sqlx::query("INSERT INTO widgets (name) VALUES ($1)")
-                .bind(n).execute(pg(&pool)).await.unwrap();
+                .bind(n)
+                .execute(pg(&pool))
+                .await
+                .unwrap();
         }
     }
 
     // Query the raw SQL way — the helper methods just emit the right WHERE.
     let alive: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM widgets WHERE deleted_at IS NULL")
-        .fetch_one(pg(&pool)).await.unwrap();
+        .fetch_one(pg(&pool))
+        .await
+        .unwrap();
     assert_eq!(alive.0, 2);
-    let trashed: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM widgets WHERE deleted_at IS NOT NULL")
-        .fetch_one(pg(&pool)).await.unwrap();
+    let trashed: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM widgets WHERE deleted_at IS NOT NULL")
+            .fetch_one(pg(&pool))
+            .await
+            .unwrap();
     assert_eq!(trashed.0, 2);
 }
 
@@ -928,7 +1079,9 @@ async fn first_or_create_returns_existing_when_match() {
             created_at: None,
             updated_at: None,
         },
-    ).await.unwrap();
+    )
+    .await
+    .unwrap();
     assert_eq!(user.name, "Ada");
 }
 
@@ -949,7 +1102,9 @@ async fn first_or_create_inserts_when_no_match() {
             created_at: None,
             updated_at: None,
         },
-    ).await.unwrap();
+    )
+    .await
+    .unwrap();
     assert_eq!(user.name, "Newbie");
     assert!(user.id > 0);
 }
@@ -971,13 +1126,17 @@ async fn update_or_create_updates_when_match() {
             created_at: None,
             updated_at: None,
         },
-    ).await.unwrap();
+    )
+    .await
+    .unwrap();
     assert_eq!(user.name, "Renamed Ada");
 
     // Confirm in DB
     let count = Author::query()
         .where_eq(Author::columns().email(), "ada@x.com".to_string())
-        .count(pg(&pool)).await.unwrap();
+        .count(pg(&pool))
+        .await
+        .unwrap();
     assert_eq!(count, 1, "should not have created a duplicate");
 }
 
@@ -998,7 +1157,9 @@ async fn update_or_create_inserts_when_no_match() {
             created_at: None,
             updated_at: None,
         },
-    ).await.unwrap();
+    )
+    .await
+    .unwrap();
     assert!(user.id > 0);
     assert_eq!(user.name, "Newest");
 }
@@ -1012,7 +1173,9 @@ async fn replicate_clones_with_reset_pk() {
 
     let ada = Author::query()
         .where_eq(Author::columns().email(), "ada@x.com".to_string())
-        .first_or_fail(pg(&pool)).await.unwrap();
+        .first_or_fail(pg(&pool))
+        .await
+        .unwrap();
     assert!(ada.id > 0);
 
     let clone = ada.replicate();
@@ -1069,7 +1232,10 @@ async fn model_find_or_fail_errors_when_missing() {
     runner.run_up().await.unwrap();
 
     let err = Author::find_or_fail(pg(&pool), 99999).await;
-    assert!(matches!(err, Err(cast::Error::NotFound)), "expected NotFound, got {err:?}");
+    assert!(
+        matches!(err, Err(cast::Error::NotFound)),
+        "expected NotFound, got {err:?}"
+    );
 }
 
 #[tokio::test]
@@ -1154,7 +1320,11 @@ async fn migrate_run_up_step_uses_distinct_batches() {
             .await
             .unwrap();
     let batches: std::collections::HashSet<i32> = rows.iter().map(|(_, b)| *b).collect();
-    assert_eq!(batches.len(), rows.len(), "each migration should get its own batch");
+    assert_eq!(
+        batches.len(),
+        rows.len(),
+        "each migration should get its own batch"
+    );
 }
 
 #[tokio::test]
@@ -1168,8 +1338,13 @@ async fn migrate_pretend_returns_sql_without_executing() {
 
     let runner = MigrationRunner::with_migrations(pool.clone(), migrations::all());
     let lines = runner.pretend().await.expect("pretend");
-    assert!(!lines.is_empty(), "pretend should return at least the create-table SQL");
-    assert!(lines.iter().any(|l| l.to_uppercase().contains("CREATE TABLE")));
+    assert!(
+        !lines.is_empty(),
+        "pretend should return at least the create-table SQL"
+    );
+    assert!(lines
+        .iter()
+        .any(|l| l.to_uppercase().contains("CREATE TABLE")));
 
     // Confirm the migrations table doesn't have any actual rows applied.
     let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM migrations")
@@ -1214,8 +1389,14 @@ async fn schema_table_alter_adds_and_drops_columns() {
     let names: Vec<String> = cols.into_iter().map(|(n,)| n).collect();
     assert!(names.contains(&"color".to_string()));
     assert!(names.contains(&"quantity".to_string()));
-    assert!(names.contains(&"label".to_string()), "rename failed: {names:?}");
-    assert!(!names.contains(&"name".to_string()), "old column should be gone: {names:?}");
+    assert!(
+        names.contains(&"label".to_string()),
+        "rename failed: {names:?}"
+    );
+    assert!(
+        !names.contains(&"name".to_string()),
+        "old column should be gone: {names:?}"
+    );
 }
 
 #[tokio::test]
@@ -1253,8 +1434,7 @@ async fn schema_richer_column_types_compile_to_valid_sql() {
     .fetch_all(pg(&pool))
     .await
     .unwrap();
-    let names: std::collections::HashSet<String> =
-        cols.into_iter().map(|(n,)| n).collect();
+    let names: std::collections::HashSet<String> = cols.into_iter().map(|(n,)| n).collect();
     for expected in [
         "id",
         "name",
@@ -1270,7 +1450,10 @@ async fn schema_richer_column_types_compile_to_valid_sql() {
         "updated_at",
         "deleted_at",
     ] {
-        assert!(names.contains(expected), "missing column {expected}: {names:?}");
+        assert!(
+            names.contains(expected),
+            "missing column {expected}: {names:?}"
+        );
     }
 }
 

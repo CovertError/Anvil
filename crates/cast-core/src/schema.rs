@@ -486,8 +486,7 @@ impl Table {
     }
 
     pub fn drop_unique(&mut self, name: &str) -> &mut Self {
-        self.drops
-            .push(format!("DROP INDEX IF EXISTS {}", name));
+        self.drops.push(format!("DROP INDEX IF EXISTS {}", name));
         self
     }
 

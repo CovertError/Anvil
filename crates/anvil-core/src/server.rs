@@ -27,10 +27,7 @@ use crate::Error;
 
 /// Apply every layer the server config calls for to the user's web router,
 /// then merge any static-file mounts. Returns a ready-to-serve `axum::Router`.
-pub fn apply_layers(
-    web: AxumRouter<Container>,
-    cfg: &ServerConfig,
-) -> AxumRouter<Container> {
+pub fn apply_layers(web: AxumRouter<Container>, cfg: &ServerConfig) -> AxumRouter<Container> {
     let mut router = web;
 
     // Static file mounts run BEFORE wrapping with body/timeout/compression — they
@@ -171,9 +168,12 @@ pub fn apply_layers(
         {
             layer = layer.no_gzip();
         }
-        if !cfg.compression.algorithms.iter().any(|a| {
-            a.eq_ignore_ascii_case("br") || a.eq_ignore_ascii_case("brotli")
-        }) {
+        if !cfg
+            .compression
+            .algorithms
+            .iter()
+            .any(|a| a.eq_ignore_ascii_case("br") || a.eq_ignore_ascii_case("brotli"))
+        {
             layer = layer.no_br();
         }
         if !cfg
@@ -199,13 +199,17 @@ pub fn apply_layers(
         ));
     }
 
-    if matches!(cfg.access_log.format, AccessLogFormat::Combined | AccessLogFormat::Json) {
+    if matches!(
+        cfg.access_log.format,
+        AccessLogFormat::Combined | AccessLogFormat::Json
+    ) {
         let format = cfg.access_log.format;
-        router = router.layer(axum::middleware::from_fn(
-            move |req: Request<Body>, next: Next| async move {
-                access_log_mw(format, req, next).await
-            },
-        ));
+        router =
+            router.layer(axum::middleware::from_fn(
+                move |req: Request<Body>, next: Next| async move {
+                    access_log_mw(format, req, next).await
+                },
+            ));
     }
 
     router
@@ -266,7 +270,9 @@ pub async fn serve(
         let permanent = redir.permanent;
         let bind = redir.bind.clone();
         tokio::spawn(async move {
-            if let Err(e) = serve_redirect_http(&bind, target_host, permanent, shutdown_redir_rx).await {
+            if let Err(e) =
+                serve_redirect_http(&bind, target_host, permanent, shutdown_redir_rx).await
+            {
                 tracing::warn!(?e, "redirect_http listener exited with error");
             }
         })
@@ -361,11 +367,7 @@ fn build_hsts_header(cfg: &HstsConfig) -> Option<HeaderValue> {
 }
 
 /// Reject requests whose Host header doesn't match any configured server_name.
-async fn host_match_mw(
-    allowed: Vec<String>,
-    req: Request<Body>,
-    next: Next,
-) -> Response<Body> {
+async fn host_match_mw(allowed: Vec<String>, req: Request<Body>, next: Next) -> Response<Body> {
     let host = req
         .headers()
         .get("host")
@@ -511,7 +513,10 @@ impl RateLimiter {
                 Some(entry) => {
                     let (window_end, count) = entry.into_value();
                     if now >= window_end {
-                        moka::ops::compute::Op::Put((now + rule.window, rule.count.saturating_sub(1)))
+                        moka::ops::compute::Op::Put((
+                            now + rule.window,
+                            rule.count.saturating_sub(1),
+                        ))
                     } else if count > 0 {
                         moka::ops::compute::Op::Put((window_end, count - 1))
                     } else {
@@ -519,7 +524,9 @@ impl RateLimiter {
                         moka::ops::compute::Op::Put((window_end, 0))
                     }
                 }
-                None => moka::ops::compute::Op::Put((now + rule.window, rule.count.saturating_sub(1))),
+                None => {
+                    moka::ops::compute::Op::Put((now + rule.window, rule.count.saturating_sub(1)))
+                }
             });
         allowed
     }
@@ -573,11 +580,7 @@ fn client_ip(req: &Request<Body>) -> String {
 
 // ─── Access log ─────────────────────────────────────────────────────────────
 
-async fn access_log_mw(
-    format: AccessLogFormat,
-    req: Request<Body>,
-    next: Next,
-) -> Response<Body> {
+async fn access_log_mw(format: AccessLogFormat, req: Request<Body>, next: Next) -> Response<Body> {
     let started = Instant::now();
     let method = req.method().clone();
     let path = req.uri().path().to_string();
@@ -681,7 +684,6 @@ impl CompiledRewrites {
             .collect();
         Self { rules: compiled }
     }
-
 }
 
 async fn rewrite_mw(
@@ -721,7 +723,8 @@ async fn rewrite_mw(
     match status {
         Some(code @ (301 | 302 | 303 | 307 | 308)) => {
             let mut resp = Response::new(Body::from(format!("Redirecting to {new_target}\n")));
-            *resp.status_mut() = StatusCode::from_u16(code).unwrap_or(StatusCode::MOVED_PERMANENTLY);
+            *resp.status_mut() =
+                StatusCode::from_u16(code).unwrap_or(StatusCode::MOVED_PERMANENTLY);
             if let Ok(loc) = HeaderValue::from_str(&new_target) {
                 resp.headers_mut().insert("location", loc);
             }
@@ -766,7 +769,11 @@ async fn trailing_slash_mw(
         path.trim_end_matches('/').to_string()
     };
 
-    let query = req.uri().query().map(|q| format!("?{q}")).unwrap_or_default();
+    let query = req
+        .uri()
+        .query()
+        .map(|q| format!("?{q}"))
+        .unwrap_or_default();
     let new_target = format!("{new_path}{query}");
 
     match cfg.action {
@@ -892,7 +899,10 @@ impl CompiledProxies {
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
 
-        Self { rules: compiled, client }
+        Self {
+            rules: compiled,
+            client,
+        }
     }
 
     fn matching(&self, path: &str) -> Option<&CompiledProxy> {
@@ -900,11 +910,7 @@ impl CompiledProxies {
     }
 }
 
-async fn proxy_mw(
-    proxies: Arc<CompiledProxies>,
-    req: Request<Body>,
-    next: Next,
-) -> Response<Body> {
+async fn proxy_mw(proxies: Arc<CompiledProxies>, req: Request<Body>, next: Next) -> Response<Body> {
     let path = req.uri().path().to_string();
     let Some(rule) = proxies.matching(&path) else {
         return next.run(req).await;
@@ -945,7 +951,11 @@ async fn proxy_forward(
     } else {
         upstream_path
     };
-    let query = parts.uri.query().map(|q| format!("?{q}")).unwrap_or_default();
+    let query = parts
+        .uri
+        .query()
+        .map(|q| format!("?{q}"))
+        .unwrap_or_default();
     let upstream_url = format!("{}{}{}", rule.upstream, upstream_path, query);
 
     let method = parts.method.clone();
@@ -1005,11 +1015,7 @@ async fn proxy_forward(
 
 // ─── CORS ───────────────────────────────────────────────────────────────────
 
-async fn cors_mw(
-    cfg: Arc<CorsConfig>,
-    req: Request<Body>,
-    next: Next,
-) -> Response<Body> {
+async fn cors_mw(cfg: Arc<CorsConfig>, req: Request<Body>, next: Next) -> Response<Body> {
     let origin = req
         .headers()
         .get("origin")
@@ -1017,19 +1023,31 @@ async fn cors_mw(
         .map(String::from);
 
     let is_allowed_origin = origin.as_deref().is_some_and(|o| {
-        cfg.allow_origins.iter().any(|allowed| allowed == "*" || allowed == o)
+        cfg.allow_origins
+            .iter()
+            .any(|allowed| allowed == "*" || allowed == o)
     });
 
     // Preflight
     if req.method() == Method::OPTIONS && origin.is_some() {
         let mut resp = Response::new(Body::empty());
         *resp.status_mut() = StatusCode::NO_CONTENT;
-        apply_cors_headers(resp.headers_mut(), &cfg, origin.as_deref(), is_allowed_origin);
+        apply_cors_headers(
+            resp.headers_mut(),
+            &cfg,
+            origin.as_deref(),
+            is_allowed_origin,
+        );
         return resp;
     }
 
     let mut resp = next.run(req).await;
-    apply_cors_headers(resp.headers_mut(), &cfg, origin.as_deref(), is_allowed_origin);
+    apply_cors_headers(
+        resp.headers_mut(),
+        &cfg,
+        origin.as_deref(),
+        is_allowed_origin,
+    );
     resp
 }
 
@@ -1091,11 +1109,7 @@ fn apply_cors_headers(
 
 // ─── IP allow/deny ──────────────────────────────────────────────────────────
 
-async fn ip_rules_mw(
-    rules: Arc<Vec<IpRule>>,
-    req: Request<Body>,
-    next: Next,
-) -> Response<Body> {
+async fn ip_rules_mw(rules: Arc<Vec<IpRule>>, req: Request<Body>, next: Next) -> Response<Body> {
     let path = req.uri().path().to_string();
     let ip_str = client_ip(&req);
     let ip = ip_str.parse::<std::net::IpAddr>().ok();
@@ -1140,7 +1154,10 @@ fn compile_basic_auth(rules: &[BasicAuthRule]) -> CompiledBasicAuth {
             let creds = r
                 .credentials
                 .iter()
-                .filter_map(|c| c.split_once(':').map(|(u, p)| (u.to_string(), p.to_string())))
+                .filter_map(|c| {
+                    c.split_once(':')
+                        .map(|(u, p)| (u.to_string(), p.to_string()))
+                })
                 .collect();
             (r.clone(), creds)
         })
@@ -1193,10 +1210,13 @@ async fn basic_auth_mw(
 async fn upstream_to_axum(resp: reqwest::Response) -> Result<Response<Body>, String> {
     let status = resp.status();
     let headers = resp.headers().clone();
-    let bytes = resp.bytes().await.map_err(|e| format!("upstream body: {e}"))?;
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("upstream body: {e}"))?;
     let mut out = Response::new(Body::from(bytes));
-    *out.status_mut() = axum::http::StatusCode::from_u16(status.as_u16())
-        .unwrap_or(axum::http::StatusCode::OK);
+    *out.status_mut() =
+        axum::http::StatusCode::from_u16(status.as_u16()).unwrap_or(axum::http::StatusCode::OK);
     for (name, value) in headers.iter() {
         let n = name.as_str().to_ascii_lowercase();
         if matches!(
@@ -1220,4 +1240,3 @@ async fn upstream_to_axum(resp: reqwest::Response) -> Result<Response<Body>, Str
     }
     Ok(out)
 }
-

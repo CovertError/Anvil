@@ -2,9 +2,9 @@
 
 use std::net::SocketAddr;
 
-use anvilforge::prelude::*;
 use anvil_core::cache::CacheStore;
 use anvil_core::container::ContainerBuilder;
+use anvilforge::prelude::*;
 use anyhow::Result;
 
 mod app;
@@ -98,7 +98,11 @@ async fn run_routes(args: &[String]) -> Result<()> {
         println!("(no routes registered or matching the filter)");
         return Ok(());
     }
-    let width = routes.iter().map(|r| r.method.as_str().len()).max().unwrap_or(6);
+    let width = routes
+        .iter()
+        .map(|r| r.method.as_str().len())
+        .max()
+        .unwrap_or(6);
     for r in &routes {
         let mw = if r.middleware.is_empty() {
             String::new()
@@ -140,10 +144,7 @@ async fn serve() -> Result<()> {
 
 async fn run_migrate() -> Result<()> {
     let pool = build_pool().await?;
-    let runner = cast::MigrationRunner::with_migrations(
-        pool,
-        app::migrations::all(),
-    );
+    let runner = cast::MigrationRunner::with_migrations(pool, app::migrations::all());
     let applied = runner.run_up().await?;
     println!("migrations applied: {applied:?}");
     Ok(())
@@ -151,10 +152,7 @@ async fn run_migrate() -> Result<()> {
 
 async fn run_migrate_rollback() -> Result<()> {
     let pool = build_pool().await?;
-    let runner = cast::MigrationRunner::with_migrations(
-        pool,
-        app::migrations::all(),
-    );
+    let runner = cast::MigrationRunner::with_migrations(pool, app::migrations::all());
     let rolled = runner.rollback().await?;
     println!("rolled back: {rolled:?}");
     Ok(())
@@ -162,10 +160,7 @@ async fn run_migrate_rollback() -> Result<()> {
 
 async fn run_migrate_fresh() -> Result<()> {
     let pool = build_pool().await?;
-    let runner = cast::MigrationRunner::with_migrations(
-        pool,
-        app::migrations::all(),
-    );
+    let runner = cast::MigrationRunner::with_migrations(pool, app::migrations::all());
     runner.fresh().await?;
     println!("fresh migrations complete");
     Ok(())

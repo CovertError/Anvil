@@ -32,13 +32,27 @@ pub fn all() -> Vec<Arc<dyn Tool>> {
         Arc::new(logs::ReadLogEntries),
         Arc::new(logs::LastError),
         Arc::new(docs::SearchDocs),
-        Arc::new(browser_tools::BrowserScreenshot { manager: manager.clone() }),
-        Arc::new(browser_tools::BrowserConsole { manager: manager.clone() }),
-        Arc::new(browser_tools::BrowserNetwork { manager: manager.clone() }),
-        Arc::new(browser_tools::BrowserEval { manager: manager.clone() }),
-        Arc::new(browser_tools::BrowserClick { manager: manager.clone() }),
-        Arc::new(browser_tools::BrowserFill { manager: manager.clone() }),
-        Arc::new(browser_tools::BrowserType { manager: manager.clone() }),
+        Arc::new(browser_tools::BrowserScreenshot {
+            manager: manager.clone(),
+        }),
+        Arc::new(browser_tools::BrowserConsole {
+            manager: manager.clone(),
+        }),
+        Arc::new(browser_tools::BrowserNetwork {
+            manager: manager.clone(),
+        }),
+        Arc::new(browser_tools::BrowserEval {
+            manager: manager.clone(),
+        }),
+        Arc::new(browser_tools::BrowserClick {
+            manager: manager.clone(),
+        }),
+        Arc::new(browser_tools::BrowserFill {
+            manager: manager.clone(),
+        }),
+        Arc::new(browser_tools::BrowserType {
+            manager: manager.clone(),
+        }),
         Arc::new(browser_tools::BrowserWaitFor { manager }),
     ]
 }

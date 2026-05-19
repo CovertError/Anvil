@@ -90,7 +90,10 @@ impl DatabaseConfig {
             .unwrap_or_else(|_| vec!["default".to_string()]);
 
         let default = env::var("DB_DEFAULT").unwrap_or_else(|_| {
-            names.first().cloned().unwrap_or_else(|| "default".to_string())
+            names
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "default".to_string())
         });
 
         let mut connections = indexmap::IndexMap::new();
@@ -99,7 +102,10 @@ impl DatabaseConfig {
             connections.insert(name.clone(), cfg);
         }
 
-        Self { default, connections }
+        Self {
+            default,
+            connections,
+        }
     }
 
     /// Convenience: the URL of the default connection.
@@ -147,9 +153,7 @@ impl ConnectionConfig {
         let url = if name == "default" {
             env::var("DATABASE_URL")
                 .or_else(|_| env::var(format!("{prefix}URL")))
-                .unwrap_or_else(|_| {
-                    "postgres://postgres:postgres@localhost:5432/anvil".to_string()
-                })
+                .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/anvil".to_string())
         } else {
             env::var(format!("{prefix}URL")).unwrap_or_default()
         };

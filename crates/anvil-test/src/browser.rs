@@ -49,9 +49,7 @@ impl Browser {
             .await
             .map_err(|e| format!("launch chromium: {e}. Install Chrome/Chromium or set the CHROME env var to its path."))?;
 
-        tokio::spawn(async move {
-            while let Some(_evt) = handler.next().await {}
-        });
+        tokio::spawn(async move { while let Some(_evt) = handler.next().await {} });
 
         Ok(Self {
             inner: Arc::new(Mutex::new(browser)),
@@ -119,12 +117,8 @@ impl Page {
             .find_element(selector)
             .await
             .map_err(|e| format!("find_element({selector}): {e}"))?;
-        el.focus()
-            .await
-            .map_err(|e| format!("focus: {e}"))?;
-        el.type_str(text)
-            .await
-            .map_err(|e| format!("type: {e}"))?;
+        el.focus().await.map_err(|e| format!("focus: {e}"))?;
+        el.type_str(text).await.map_err(|e| format!("type: {e}"))?;
         Ok(self)
     }
 
@@ -188,7 +182,8 @@ impl Page {
             .evaluate(wrapped)
             .await
             .map_err(|e| format!("eval: {e}"))?;
-        out.into_value::<T>().map_err(|e| format!("eval decode: {e}"))
+        out.into_value::<T>()
+            .map_err(|e| format!("eval decode: {e}"))
     }
 
     /// Take a PNG screenshot of the current page.

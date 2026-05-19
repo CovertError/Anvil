@@ -22,7 +22,10 @@ pub fn run(target: &str) -> Result<()> {
         .map(sanitize_pkg_name)
         .unwrap_or_else(|| "app".to_string());
     if pkg_name.is_empty() {
-        anyhow::bail!("could not derive a package name from path: {}", root.display());
+        anyhow::bail!(
+            "could not derive a package name from path: {}",
+            root.display()
+        );
     }
 
     fs::create_dir_all(&root)?;
@@ -750,12 +753,30 @@ impl HomeController {
     )?;
 
     for (path, body) in [
-        ("app/Jobs/mod.rs",          "//! Background jobs — `#[derive(Job)]` makes them dispatchable.\n"),
-        ("app/Listeners/mod.rs",     "//! Event listeners — register in `app/Providers/EventServiceProvider.rs`.\n"),
-        ("app/Mail/mod.rs",          "//! Mailables — types that implement `anvilforge::mail::Mailable`.\n"),
-        ("app/Notifications/mod.rs", "//! Notifications — types that implement `anvilforge::notification::Notification`.\n"),
-        ("app/Policies/mod.rs",      "//! Authorization policies — implement `Policy<User, Subject>` per model.\n"),
-        ("app/Rules/mod.rs",         "//! Custom validation rules — composable garde validators.\n"),
+        (
+            "app/Jobs/mod.rs",
+            "//! Background jobs — `#[derive(Job)]` makes them dispatchable.\n",
+        ),
+        (
+            "app/Listeners/mod.rs",
+            "//! Event listeners — register in `app/Providers/EventServiceProvider.rs`.\n",
+        ),
+        (
+            "app/Mail/mod.rs",
+            "//! Mailables — types that implement `anvilforge::mail::Mailable`.\n",
+        ),
+        (
+            "app/Notifications/mod.rs",
+            "//! Notifications — types that implement `anvilforge::notification::Notification`.\n",
+        ),
+        (
+            "app/Policies/mod.rs",
+            "//! Authorization policies — implement `Policy<User, Subject>` per model.\n",
+        ),
+        (
+            "app/Rules/mod.rs",
+            "//! Custom validation rules — composable garde validators.\n",
+        ),
     ] {
         write(root, path, body)?;
     }
@@ -940,7 +961,11 @@ pub mod session;
     )?;
 
     write(root, "config/app.rs",         "pub use anvilforge::config::AppConfig as Config;\npub fn config() -> Config { Config::from_env() }\n")?;
-    write(root, "config/auth.rs",        "//! Auth config — provider mapping, password reset table, etc.\n")?;
+    write(
+        root,
+        "config/auth.rs",
+        "//! Auth config — provider mapping, password reset table, etc.\n",
+    )?;
     write(root, "config/cache.rs",       "pub use anvilforge::config::CacheConfig as Config;\npub fn config() -> Config { Config::from_env() }\n")?;
     write(root, "config/filesystems.rs", "pub use anvilforge::config::FilesystemConfig as Config;\npub fn config() -> Config { Config::from_env() }\n")?;
     write(root, "config/mail.rs",        "pub use anvilforge::config::MailConfig as Config;\npub fn config() -> Config { Config::from_env() }\n")?;

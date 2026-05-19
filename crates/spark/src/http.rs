@@ -26,11 +26,11 @@ pub async fn runtime_js() -> impl IntoResponse {
     (
         StatusCode::OK,
         [
-            (header::CONTENT_TYPE, "application/javascript; charset=utf-8"),
             (
-                header::CACHE_CONTROL,
-                "public, max-age=31536000, immutable",
+                header::CONTENT_TYPE,
+                "application/javascript; charset=utf-8",
             ),
+            (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
         ],
         RUNTIME_JS,
     )

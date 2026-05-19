@@ -8,13 +8,7 @@ use std::process::Command;
 
 pub fn run(force: bool) -> Result<()> {
     let mut cmd = Command::new("cargo");
-    cmd.args([
-        "install",
-        "--path",
-        "crates/smith",
-        "--bin",
-        "anvil",
-    ]);
+    cmd.args(["install", "--path", "crates/smith", "--bin", "anvil"]);
     if force {
         cmd.arg("--force");
     }

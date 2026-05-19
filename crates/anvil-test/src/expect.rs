@@ -189,7 +189,12 @@ impl Expect<String> {
 
 impl<T: Debug + PartialEq> Expect<Vec<T>> {
     pub fn to_have_length(self, len: usize) -> Self {
-        assert_eq!(self.0.len(), len, "expected length {len}, got {}", self.0.len());
+        assert_eq!(
+            self.0.len(),
+            len,
+            "expected length {len}, got {}",
+            self.0.len()
+        );
         self
     }
     pub fn to_contain(self, item: T) -> Self {

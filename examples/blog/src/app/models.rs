@@ -1,8 +1,8 @@
 //! Models for the blog example.
 
+use anvilforge::async_trait::async_trait;
 use anvilforge::prelude::*;
 use anvilforge::seeder::{Factory, HasFactory, PersistentFactory};
-use anvilforge::async_trait::async_trait;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Model)]
 #[table("authors")]

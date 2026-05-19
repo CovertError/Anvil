@@ -52,24 +52,30 @@ impl MigrationRunner {
 
     fn migrations_table_ddl(&self) -> &'static str {
         match self.driver() {
-            Driver::Postgres => "CREATE TABLE IF NOT EXISTS migrations (
+            Driver::Postgres => {
+                "CREATE TABLE IF NOT EXISTS migrations (
                 id BIGSERIAL PRIMARY KEY,
                 name TEXT NOT NULL UNIQUE,
                 batch INTEGER NOT NULL,
                 applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )",
-            Driver::MySql => "CREATE TABLE IF NOT EXISTS migrations (
+            )"
+            }
+            Driver::MySql => {
+                "CREATE TABLE IF NOT EXISTS migrations (
                 id BIGINT AUTO_INCREMENT PRIMARY KEY,
                 name VARCHAR(255) NOT NULL UNIQUE,
                 batch INT NOT NULL,
                 applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )",
-            Driver::Sqlite => "CREATE TABLE IF NOT EXISTS migrations (
+            )"
+            }
+            Driver::Sqlite => {
+                "CREATE TABLE IF NOT EXISTS migrations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
                 batch INTEGER NOT NULL,
                 applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )",
+            )"
+            }
         }
     }
 
@@ -113,19 +119,25 @@ impl MigrationRunner {
     async fn applied_rows(&self) -> Result<Vec<(String, i32)>, Error> {
         Ok(match &self.pool {
             Pool::Postgres(p) => {
-                sqlx::query_as::<_, (String, i32)>("SELECT name, batch FROM migrations ORDER BY batch, id")
-                    .fetch_all(p)
-                    .await?
+                sqlx::query_as::<_, (String, i32)>(
+                    "SELECT name, batch FROM migrations ORDER BY batch, id",
+                )
+                .fetch_all(p)
+                .await?
             }
             Pool::MySql(p) => {
-                sqlx::query_as::<_, (String, i32)>("SELECT name, batch FROM migrations ORDER BY batch, id")
-                    .fetch_all(p)
-                    .await?
+                sqlx::query_as::<_, (String, i32)>(
+                    "SELECT name, batch FROM migrations ORDER BY batch, id",
+                )
+                .fetch_all(p)
+                .await?
             }
             Pool::Sqlite(p) => {
-                sqlx::query_as::<_, (String, i32)>("SELECT name, batch FROM migrations ORDER BY batch, id")
-                    .fetch_all(p)
-                    .await?
+                sqlx::query_as::<_, (String, i32)>(
+                    "SELECT name, batch FROM migrations ORDER BY batch, id",
+                )
+                .fetch_all(p)
+                .await?
             }
         })
     }
@@ -155,12 +167,24 @@ impl MigrationRunner {
 
     async fn names_in_batch(&self, batch: i32) -> Result<Vec<String>, Error> {
         let rows: Vec<(String,)> = match &self.pool {
-            Pool::Postgres(p) => sqlx::query_as("SELECT name FROM migrations WHERE batch = $1 ORDER BY id DESC")
-                .bind(batch).fetch_all(p).await?,
-            Pool::MySql(p) => sqlx::query_as("SELECT name FROM migrations WHERE batch = ? ORDER BY id DESC")
-                .bind(batch).fetch_all(p).await?,
-            Pool::Sqlite(p) => sqlx::query_as("SELECT name FROM migrations WHERE batch = ?1 ORDER BY id DESC")
-                .bind(batch).fetch_all(p).await?,
+            Pool::Postgres(p) => {
+                sqlx::query_as("SELECT name FROM migrations WHERE batch = $1 ORDER BY id DESC")
+                    .bind(batch)
+                    .fetch_all(p)
+                    .await?
+            }
+            Pool::MySql(p) => {
+                sqlx::query_as("SELECT name FROM migrations WHERE batch = ? ORDER BY id DESC")
+                    .bind(batch)
+                    .fetch_all(p)
+                    .await?
+            }
+            Pool::Sqlite(p) => {
+                sqlx::query_as("SELECT name FROM migrations WHERE batch = ?1 ORDER BY id DESC")
+                    .bind(batch)
+                    .fetch_all(p)
+                    .await?
+            }
         };
         Ok(rows.into_iter().map(|(n,)| n).collect())
     }
@@ -169,15 +193,24 @@ impl MigrationRunner {
         match &self.pool {
             Pool::Postgres(p) => {
                 sqlx::query("INSERT INTO migrations (name, batch) VALUES ($1, $2)")
-                    .bind(name).bind(batch).execute(p).await?;
+                    .bind(name)
+                    .bind(batch)
+                    .execute(p)
+                    .await?;
             }
             Pool::MySql(p) => {
                 sqlx::query("INSERT INTO migrations (name, batch) VALUES (?, ?)")
-                    .bind(name).bind(batch).execute(p).await?;
+                    .bind(name)
+                    .bind(batch)
+                    .execute(p)
+                    .await?;
             }
             Pool::Sqlite(p) => {
                 sqlx::query("INSERT INTO migrations (name, batch) VALUES (?1, ?2)")
-                    .bind(name).bind(batch).execute(p).await?;
+                    .bind(name)
+                    .bind(batch)
+                    .execute(p)
+                    .await?;
             }
         }
         Ok(())
@@ -186,13 +219,22 @@ impl MigrationRunner {
     async fn delete_applied(&self, name: &str) -> Result<(), Error> {
         match &self.pool {
             Pool::Postgres(p) => {
-                sqlx::query("DELETE FROM migrations WHERE name = $1").bind(name).execute(p).await?;
+                sqlx::query("DELETE FROM migrations WHERE name = $1")
+                    .bind(name)
+                    .execute(p)
+                    .await?;
             }
             Pool::MySql(p) => {
-                sqlx::query("DELETE FROM migrations WHERE name = ?").bind(name).execute(p).await?;
+                sqlx::query("DELETE FROM migrations WHERE name = ?")
+                    .bind(name)
+                    .execute(p)
+                    .await?;
             }
             Pool::Sqlite(p) => {
-                sqlx::query("DELETE FROM migrations WHERE name = ?1").bind(name).execute(p).await?;
+                sqlx::query("DELETE FROM migrations WHERE name = ?1")
+                    .bind(name)
+                    .execute(p)
+                    .await?;
             }
         }
         Ok(())
@@ -213,7 +255,12 @@ impl MigrationRunner {
     }
 
     pub async fn applied(&self) -> Result<Vec<String>, Error> {
-        Ok(self.applied_rows().await?.into_iter().map(|(n, _)| n).collect())
+        Ok(self
+            .applied_rows()
+            .await?
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect())
     }
 
     pub async fn next_batch(&self) -> Result<i32, Error> {

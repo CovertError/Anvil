@@ -24,7 +24,10 @@ pub fn model(name: &str, with_migration: bool, fields: &[String]) -> Result<()> 
     println!("created {}", path.display());
 
     if with_migration {
-        migration(&format!("create_{}_table", pluralize_snake(&snake_case(name))))?;
+        migration(&format!(
+            "create_{}_table",
+            pluralize_snake(&snake_case(name))
+        ))?;
     }
     Ok(())
 }
@@ -162,9 +165,8 @@ pub fn seeder(name: &str) -> Result<()> {
     // Inventory auto-discovers via `#[derive(Seeder)]` — no manual registration.
     let mod_rs = project_root().join("database/seeders/mod.rs");
     let mod_name = snake_case(name);
-    let line = format!(
-        "\n#[path = \"{name}.rs\"]\npub mod {mod_name};\npub use {mod_name}::{name};\n"
-    );
+    let line =
+        format!("\n#[path = \"{name}.rs\"]\npub mod {mod_name};\npub use {mod_name}::{name};\n");
     if mod_rs.exists() {
         let mut current = std::fs::read_to_string(&mod_rs).unwrap_or_default();
         if !current.contains(&format!("\"{name}.rs\"")) {
@@ -202,9 +204,8 @@ pub fn component(name: &str) -> Result<()> {
     // Auto-include `pub mod <snake>;` in app/Spark/mod.rs (create if missing).
     let mod_rs = project_root().join("app/Spark/mod.rs");
     let mod_name = snake.clone();
-    let line = format!(
-        "\n#[path = \"{name}.rs\"]\npub mod {mod_name};\npub use {mod_name}::{name};\n"
-    );
+    let line =
+        format!("\n#[path = \"{name}.rs\"]\npub mod {mod_name};\npub use {mod_name}::{name};\n");
     if mod_rs.exists() {
         let mut current = std::fs::read_to_string(&mod_rs).unwrap_or_default();
         if !current.contains(&format!("\"{name}.rs\"")) {
@@ -234,9 +235,7 @@ pub fn component(name: &str) -> Result<()> {
 
 pub fn factory(name: &str, model: Option<&str>) -> Result<()> {
     // Infer model from factory name: PostFactory → Post (default).
-    let model_name = model.unwrap_or_else(|| {
-        name.strip_suffix("Factory").unwrap_or(name)
-    });
+    let model_name = model.unwrap_or_else(|| name.strip_suffix("Factory").unwrap_or(name));
     let path = project_root().join(format!("database/factories/{name}.rs"));
     write_template(
         &path,
@@ -247,8 +246,14 @@ pub fn factory(name: &str, model: Option<&str>) -> Result<()> {
     println!();
     println!("  to wire it up:");
     println!("    1. In database/factories/mod.rs:");
-    println!("         #[path = \"{name}.rs\"] mod {factory_mod};", factory_mod = snake_case(name));
-    println!("         pub use {factory_mod}::{name};", factory_mod = snake_case(name));
+    println!(
+        "         #[path = \"{name}.rs\"] mod {factory_mod};",
+        factory_mod = snake_case(name)
+    );
+    println!(
+        "         pub use {factory_mod}::{name};",
+        factory_mod = snake_case(name)
+    );
     println!();
     Ok(())
 }

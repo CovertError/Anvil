@@ -14,7 +14,10 @@ use crate::container::Container;
 use crate::Error;
 
 pub type MiddlewareFn = Arc<
-    dyn Fn(Request<Body>, Next) -> futures::future::BoxFuture<'static, Result<Response<Body>, Error>>
+    dyn Fn(
+            Request<Body>,
+            Next,
+        ) -> futures::future::BoxFuture<'static, Result<Response<Body>, Error>>
         + Send
         + Sync,
 >;
@@ -173,7 +176,9 @@ pub mod builtin {
         if content_type.starts_with("application/x-www-form-urlencoded") {
             let pairs: Vec<(String, String)> =
                 serde_urlencoded::from_bytes(body).unwrap_or_default();
-            return pairs.into_iter().find_map(|(k, v)| (k == "_token").then_some(v));
+            return pairs
+                .into_iter()
+                .find_map(|(k, v)| (k == "_token").then_some(v));
         }
         if content_type.starts_with("application/json") {
             let value: serde_json::Value = serde_json::from_slice(body).ok()?;
@@ -205,11 +210,7 @@ pub fn install_defaults(registry: &MiddlewareRegistry) {
 
 /// Apply a middleware by name to an axum router-style handler chain.
 /// The error from `MiddlewareFn` is converted to a 500 response if not handled.
-pub async fn invoke(
-    mw: MiddlewareFn,
-    req: Request<Body>,
-    next: Next,
-) -> Response<Body> {
+pub async fn invoke(mw: MiddlewareFn, req: Request<Body>, next: Next) -> Response<Body> {
     match mw(req, next).await {
         Ok(resp) => resp,
         Err(err) => {
@@ -220,7 +221,9 @@ pub async fn invoke(
 }
 
 /// Convenience for constructing a tracing layer with sensible defaults.
-pub fn trace_layer() -> TraceLayer<tower_http::classify::SharedClassifier<tower_http::classify::ServerErrorsAsFailures>> {
+pub fn trace_layer(
+) -> TraceLayer<tower_http::classify::SharedClassifier<tower_http::classify::ServerErrorsAsFailures>>
+{
     TraceLayer::new_for_http()
 }
 
@@ -234,6 +237,13 @@ pub async fn inject_container_mw(
     crate::container::with_container(container, async move { next.run(req).await }).await
 }
 
-pub fn standard_layers() -> ServiceBuilder<tower::layer::util::Stack<TraceLayer<tower_http::classify::SharedClassifier<tower_http::classify::ServerErrorsAsFailures>>, tower::layer::util::Identity>> {
+pub fn standard_layers() -> ServiceBuilder<
+    tower::layer::util::Stack<
+        TraceLayer<
+            tower_http::classify::SharedClassifier<tower_http::classify::ServerErrorsAsFailures>,
+        >,
+        tower::layer::util::Identity,
+    >,
+> {
     ServiceBuilder::new().layer(trace_layer())
 }

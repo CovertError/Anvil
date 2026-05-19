@@ -264,9 +264,7 @@ enum Commands {
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_target(false)
-        .with_env_filter(
-            std::env::var("LOG_LEVEL").unwrap_or_else(|_| "info".to_string()),
-        )
+        .with_env_filter(std::env::var("LOG_LEVEL").unwrap_or_else(|_| "info".to_string()))
         .try_init()
         .ok();
 
@@ -317,9 +315,11 @@ fn main() -> Result<()> {
         Commands::Fmt { check } => commands::fmt::run(check),
         Commands::Lint { fix } => commands::lint::run(fix),
         Commands::Install { force } => commands::install::run(force),
-        Commands::Routes { method, prefix, json } => {
-            commands::routes::run(method.as_deref(), prefix.as_deref(), json)
-        }
+        Commands::Routes {
+            method,
+            prefix,
+            json,
+        } => commands::routes::run(method.as_deref(), prefix.as_deref(), json),
         Commands::Bench {
             concurrency,
             seconds,

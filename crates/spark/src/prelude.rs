@@ -12,4 +12,7 @@ pub use crate::install::{install, install_routes};
 pub use crate::registry::{BoxedComponent, ComponentEntry, DynComponent};
 pub use crate::Result;
 
-pub use spark_derive::{actions as spark_actions, component as spark_component, mount as spark_mount, on as spark_on, updated as spark_updated};
+pub use spark_derive::{
+    actions as spark_actions, component as spark_component, mount as spark_mount, on as spark_on,
+    updated as spark_updated,
+};

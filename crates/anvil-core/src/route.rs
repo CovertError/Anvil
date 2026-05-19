@@ -75,12 +75,12 @@ impl Router {
         for name in self.middleware_stack.iter().rev() {
             if let Some(mw) = self.registry.get(name) {
                 let mw = mw.clone();
-                let layer = axum::middleware::from_fn(move |req: Request<Body>, next: axum::middleware::Next| {
-                    let mw = mw.clone();
-                    async move {
-                        crate::middleware::invoke(mw, req, next).await
-                    }
-                });
+                let layer = axum::middleware::from_fn(
+                    move |req: Request<Body>, next: axum::middleware::Next| {
+                        let mw = mw.clone();
+                        async move { crate::middleware::invoke(mw, req, next).await }
+                    },
+                );
                 mr = mr.layer(layer);
             } else {
                 tracing::warn!(name, "unknown middleware referenced in route; ignoring");
@@ -222,11 +222,15 @@ impl Router {
     pub fn layer<L>(mut self, layer: L) -> Self
     where
         L: tower::Layer<axum::routing::Route> + Clone + Send + Sync + 'static,
-        L::Service: tower::Service<axum::http::Request<axum::body::Body>, Response = axum::http::Response<axum::body::Body>, Error = std::convert::Infallible>
-            + Clone
+        L::Service: tower::Service<
+                axum::http::Request<axum::body::Body>,
+                Response = axum::http::Response<axum::body::Body>,
+                Error = std::convert::Infallible,
+            > + Clone
             + Send
             + 'static,
-        <L::Service as tower::Service<axum::http::Request<axum::body::Body>>>::Future: Send + 'static,
+        <L::Service as tower::Service<axum::http::Request<axum::body::Body>>>::Future:
+            Send + 'static,
     {
         self.inner = self.inner.layer(layer);
         self

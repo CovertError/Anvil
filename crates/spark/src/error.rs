@@ -38,18 +38,16 @@ impl From<Error> for anvil_core::Error {
     fn from(e: Error) -> Self {
         match &e {
             Error::SnapshotTampered => anvil_core::Error::forbidden("snapshot tampered"),
-            Error::SnapshotTooLarge { .. } => {
-                anvil_core::Error::bad_request(format!("{e}"))
-            }
+            Error::SnapshotTooLarge { .. } => anvil_core::Error::bad_request(format!("{e}")),
             Error::SnapshotDecode(msg) => {
                 anvil_core::Error::bad_request(format!("snapshot decode: {msg}"))
             }
             Error::UnknownComponent(c) => {
                 anvil_core::Error::bad_request(format!("unknown component: {c}"))
             }
-            Error::UnknownMethod { class, method } => anvil_core::Error::bad_request(format!(
-                "unknown method `{method}` on `{class}`"
-            )),
+            Error::UnknownMethod { class, method } => {
+                anvil_core::Error::bad_request(format!("unknown method `{method}` on `{class}`"))
+            }
             Error::InvalidArguments { method, message } => {
                 anvil_core::Error::bad_request(format!("invalid args for {method}: {message}"))
             }

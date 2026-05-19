@@ -7,7 +7,9 @@ use cast::Schema;
 #[derive(Migration)]
 pub struct CreateAuthorsTable;
 impl CastMigration for CreateAuthorsTable {
-    fn name(&self) -> &'static str { "2026_01_01_000001_create_authors_table" }
+    fn name(&self) -> &'static str {
+        "2026_01_01_000001_create_authors_table"
+    }
     fn up(&self, s: &mut Schema) {
         s.create("authors", |t| {
             t.id();
@@ -24,7 +26,9 @@ impl CastMigration for CreateAuthorsTable {
 #[derive(Migration)]
 pub struct CreatePostsTable;
 impl CastMigration for CreatePostsTable {
-    fn name(&self) -> &'static str { "2026_01_01_000002_create_posts_table" }
+    fn name(&self) -> &'static str {
+        "2026_01_01_000002_create_posts_table"
+    }
     fn up(&self, s: &mut Schema) {
         s.create("posts", |t| {
             t.id();
@@ -43,7 +47,9 @@ impl CastMigration for CreatePostsTable {
 #[derive(Migration)]
 pub struct CreateJobsTable;
 impl CastMigration for CreateJobsTable {
-    fn name(&self) -> &'static str { "2026_01_01_000003_create_jobs_table" }
+    fn name(&self) -> &'static str {
+        "2026_01_01_000003_create_jobs_table"
+    }
     fn up(&self, s: &mut Schema) {
         s.raw("CREATE TABLE IF NOT EXISTS jobs (id UUID PRIMARY KEY, job_type TEXT NOT NULL, payload JSONB NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 3, queue TEXT NOT NULL, available_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
         s.raw("CREATE TABLE IF NOT EXISTS failed_jobs (id UUID PRIMARY KEY, job_type TEXT NOT NULL, payload JSONB NOT NULL, error TEXT NOT NULL, failed_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");

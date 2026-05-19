@@ -29,9 +29,9 @@ pub fn collect_relations(input: &DeriveInput) -> syn::Result<Vec<RelationDecl>> 
             "has_many" => {
                 let (target, fk_override, method_override) = parse_relation_args(attr)?;
                 let target_ident = last_segment(&target);
-                let method = method_override.unwrap_or_else(|| pluralize_snake(&snake_case(&target_ident)));
-                let foreign_key =
-                    fk_override.unwrap_or_else(|| format!("{}_id", &parent_snake));
+                let method =
+                    method_override.unwrap_or_else(|| pluralize_snake(&snake_case(&target_ident)));
+                let foreign_key = fk_override.unwrap_or_else(|| format!("{}_id", &parent_snake));
                 relations.push(RelationDecl {
                     kind: "HasMany".into(),
                     kind_token: syn::parse_quote!(HasMany),
@@ -45,8 +45,7 @@ pub fn collect_relations(input: &DeriveInput) -> syn::Result<Vec<RelationDecl>> 
                 let (target, fk_override, method_override) = parse_relation_args(attr)?;
                 let target_ident = last_segment(&target);
                 let method = method_override.unwrap_or_else(|| snake_case(&target_ident));
-                let foreign_key =
-                    fk_override.unwrap_or_else(|| format!("{}_id", &parent_snake));
+                let foreign_key = fk_override.unwrap_or_else(|| format!("{}_id", &parent_snake));
                 relations.push(RelationDecl {
                     kind: "HasOne".into(),
                     kind_token: syn::parse_quote!(HasOne),
@@ -60,8 +59,8 @@ pub fn collect_relations(input: &DeriveInput) -> syn::Result<Vec<RelationDecl>> 
                 let (target, fk_override, method_override) = parse_relation_args(attr)?;
                 let target_ident = last_segment(&target);
                 let method = method_override.unwrap_or_else(|| snake_case(&target_ident));
-                let foreign_key = fk_override
-                    .unwrap_or_else(|| format!("{}_id", snake_case(&target_ident)));
+                let foreign_key =
+                    fk_override.unwrap_or_else(|| format!("{}_id", snake_case(&target_ident)));
                 relations.push(RelationDecl {
                     kind: "BelongsTo".into(),
                     kind_token: syn::parse_quote!(BelongsTo),

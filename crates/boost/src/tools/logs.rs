@@ -28,10 +28,16 @@ impl Tool for ReadLogEntries {
 
     async fn call(&self, ctx: &Context, args: Value) -> CallToolResult {
         let n = args.get("lines").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
-        let level = args.get("level").and_then(|v| v.as_str()).map(str::to_ascii_uppercase);
+        let level = args
+            .get("level")
+            .and_then(|v| v.as_str())
+            .map(str::to_ascii_uppercase);
         let entries = ctx.log_buffer.tail(n.min(5000));
         let filtered: Vec<_> = match level {
-            Some(lvl) => entries.into_iter().filter(|e| e.level.eq_ignore_ascii_case(&lvl)).collect(),
+            Some(lvl) => entries
+                .into_iter()
+                .filter(|e| e.level.eq_ignore_ascii_case(&lvl))
+                .collect(),
             None => entries,
         };
         CallToolResult::json(&json!({
@@ -54,8 +60,12 @@ impl Tool for LastError {
 
     async fn call(&self, ctx: &Context, _args: Value) -> CallToolResult {
         match ctx.log_buffer.last_error() {
-            Some(entry) => CallToolResult::json(&serde_json::to_value(entry).unwrap_or(Value::Null)),
-            None => CallToolResult::json(&json!({ "error": null, "note": "no error-level entries captured since startup" })),
+            Some(entry) => {
+                CallToolResult::json(&serde_json::to_value(entry).unwrap_or(Value::Null))
+            }
+            None => CallToolResult::json(
+                &json!({ "error": null, "note": "no error-level entries captured since startup" }),
+            ),
         }
     }
 }

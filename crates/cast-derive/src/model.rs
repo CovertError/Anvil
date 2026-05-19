@@ -70,10 +70,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         .map(|f| f.ty.clone())
         .unwrap();
 
-    let columns_array = column_names
-        .iter()
-        .map(|n| quote!(#n))
-        .collect::<Vec<_>>();
+    let columns_array = column_names.iter().map(|n| quote!(#n)).collect::<Vec<_>>();
 
     let relations = collect_relations(input)?;
     let relation_methods = relations
@@ -153,16 +150,17 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         quote! { let q = q.bind(&self.#i); }
     });
 
-    let soft_deletes_lit = if has_soft_deletes { quote!(true) } else { quote!(false) };
+    let soft_deletes_lit = if has_soft_deletes {
+        quote!(true)
+    } else {
+        quote!(false)
+    };
 
     // Soft-delete variants of save/delete. `delete()` becomes UPDATE SET deleted_at = NOW().
-    let soft_delete_sql = format!(
-        "UPDATE {table_name} SET deleted_at = CURRENT_TIMESTAMP WHERE {pk_column} = $1"
-    );
+    let soft_delete_sql =
+        format!("UPDATE {table_name} SET deleted_at = CURRENT_TIMESTAMP WHERE {pk_column} = $1");
     let force_delete_sql = format!("DELETE FROM {table_name} WHERE {pk_column} = $1");
-    let restore_sql = format!(
-        "UPDATE {table_name} SET deleted_at = NULL WHERE {pk_column} = $1"
-    );
+    let restore_sql = format!("UPDATE {table_name} SET deleted_at = NULL WHERE {pk_column} = $1");
 
     let soft_delete_sql_lit = syn::LitStr::new(&soft_delete_sql, struct_name.span());
     let force_delete_sql_lit = syn::LitStr::new(&force_delete_sql, struct_name.span());
@@ -580,11 +578,7 @@ fn relation_type_decl(parent: &syn::Ident, rel: &RelationDecl) -> TokenStream {
     }
 }
 
-fn expand_relation(
-    _parent: &syn::Ident,
-    pk_field: &syn::Ident,
-    rel: &RelationDecl,
-) -> TokenStream {
+fn expand_relation(_parent: &syn::Ident, pk_field: &syn::Ident, rel: &RelationDecl) -> TokenStream {
     let method = format_ident!("{}", rel.method_name);
     let rel_method = format_ident!("{}_rel", rel.method_name);
     let rel_type_name = format_ident!("{}{}Rel", _parent, capitalize(&rel.method_name));

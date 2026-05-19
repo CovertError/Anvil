@@ -72,7 +72,9 @@ pub fn scaffold() -> Result<()> {
     println!("    5. In database/migrations/mod.rs:");
     println!("         #[path = \"2026_01_01_000099_add_auth_columns_to_users.rs\"]");
     println!("         pub mod add_auth_columns;");
-    println!("         // then add `Box::new(add_auth_columns::AddAuthColumnsToUsersTable)` to all()");
+    println!(
+        "         // then add `Box::new(add_auth_columns::AddAuthColumnsToUsersTable)` to all()"
+    );
     println!("    6. smith migrate");
     println!();
     Ok(())

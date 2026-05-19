@@ -20,5 +20,5 @@ pub use cast_core::*;
 pub use cast_derive::Model;
 
 // Re-export sqlx and sea-query so downstream crates can rely on Cast's pinned versions.
-pub use sqlx;
 pub use sea_query;
+pub use sqlx;

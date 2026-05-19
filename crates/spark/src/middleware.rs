@@ -12,10 +12,7 @@ use anvil_core::middleware::builtin::ensure_csrf_token;
 
 /// Open a fresh `spark.scope` per request. Picks up the CSRF token from the
 /// session (creating one if needed) so `@sparkScripts` can emit it.
-pub async fn scope_mw(
-    req: Request<Body>,
-    next: Next,
-) -> Result<Response<Body>, anvil_core::Error> {
+pub async fn scope_mw(req: Request<Body>, next: Next) -> Result<Response<Body>, anvil_core::Error> {
     let (mut parts, body) = req.into_parts();
     let csrf = match Session::from_request_parts(&mut parts, &()).await {
         Ok(session) => ensure_csrf_token(&session).await.unwrap_or_default(),
@@ -23,7 +20,7 @@ pub async fn scope_mw(
     };
     let req = Request::from_parts(parts, body);
 
-    let resp = crate::render::with_request_scope_csrf(csrf, async move { next.run(req).await })
-        .await;
+    let resp =
+        crate::render::with_request_scope_csrf(csrf, async move { next.run(req).await }).await;
     Ok(resp)
 }

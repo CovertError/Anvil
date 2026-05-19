@@ -403,10 +403,8 @@ impl ServerConfig {
 
     pub fn from_file(path: &std::path::Path) -> crate::Result<Self> {
         let bytes = std::fs::read_to_string(path)?;
-        let cfg: Self = toml::from_str(&bytes).map_err(|e| crate::Error::Config(format!(
-            "toml parse {}: {e}",
-            path.display()
-        )))?;
+        let cfg: Self = toml::from_str(&bytes)
+            .map_err(|e| crate::Error::Config(format!("toml parse {}: {e}", path.display())))?;
         Ok(cfg.apply_env_overrides())
     }
 
@@ -440,13 +438,13 @@ fn deserialize_size<'de, D: Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
     }
 }
 
-fn deserialize_opt_duration<'de, D: Deserializer<'de>>(
-    d: D,
-) -> Result<Option<Duration>, D::Error> {
+fn deserialize_opt_duration<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Duration>, D::Error> {
     use serde::de::Error;
     let v = Option::<toml::Value>::deserialize(d)?;
     match v {
-        None | Some(toml::Value::String(_)) if matches!(&v, Some(toml::Value::String(s)) if s.is_empty()) => Ok(None),
+        None | Some(toml::Value::String(_)) if matches!(&v, Some(toml::Value::String(s)) if s.is_empty()) => {
+            Ok(None)
+        }
         None => Ok(None),
         Some(toml::Value::Integer(n)) => Ok(Some(Duration::from_secs(n.max(0) as u64))),
         Some(toml::Value::String(s)) => parse_duration(&s).map(Some).map_err(D::Error::custom),
@@ -512,13 +510,17 @@ pub fn parse_duration(s: &str) -> Result<Duration, String> {
 }
 
 fn split_num_unit(s: &str) -> (&str, &str) {
-    let split = s.find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-').unwrap_or(s.len());
+    let split = s
+        .find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-')
+        .unwrap_or(s.len());
     (s[..split].trim(), s[split..].trim())
 }
 
 /// Parse `"60/minute"` → (count, window).
 pub fn parse_rate(s: &str) -> Result<(u32, Duration), String> {
-    let (count, window) = s.split_once('/').ok_or_else(|| format!("rate must be `<count>/<window>`: {s}"))?;
+    let (count, window) = s
+        .split_once('/')
+        .ok_or_else(|| format!("rate must be `<count>/<window>`: {s}"))?;
     let count: u32 = count
         .trim()
         .parse()
@@ -547,7 +549,10 @@ mod tests {
         assert_eq!(parse_duration("5m").unwrap(), Duration::from_secs(300));
         assert_eq!(parse_duration("1h").unwrap(), Duration::from_secs(3600));
         assert_eq!(parse_duration("1d").unwrap(), Duration::from_secs(86400));
-        assert_eq!(parse_duration("1y").unwrap(), Duration::from_secs(86400 * 365));
+        assert_eq!(
+            parse_duration("1y").unwrap(),
+            Duration::from_secs(86400 * 365)
+        );
         assert_eq!(parse_duration("42").unwrap(), Duration::from_secs(42));
         assert!(parse_duration("bad").is_err());
     }
@@ -600,9 +605,15 @@ mod tests {
             credentials = ["alice:secret", "bob:second"]
         "#;
         let cfg: ServerConfig = toml::from_str(toml).unwrap();
-        assert_eq!(cfg.server_name, vec!["example.com", "www.example.com", "*.example.com"]);
+        assert_eq!(
+            cfg.server_name,
+            vec!["example.com", "www.example.com", "*.example.com"]
+        );
         assert!(cfg.redirect_http.is_some());
-        assert_eq!(cfg.redirect_http.as_ref().unwrap().target_host.as_deref(), Some("example.com"));
+        assert_eq!(
+            cfg.redirect_http.as_ref().unwrap().target_host.as_deref(),
+            Some("example.com")
+        );
         assert!(cfg.hsts.enabled);
         assert_eq!(cfg.hsts.max_age, Some(Duration::from_secs(86400 * 365)));
         assert!(cfg.cors.enabled);
@@ -701,7 +712,10 @@ mod tests {
             Some(Duration::from_secs(86400 * 365))
         );
         assert_eq!(cfg.rate_limit.per_ip.as_deref(), Some("60/minute"));
-        assert_eq!(cfg.rate_limit.routes.get("POST /login").map(String::as_str), Some("5/minute"));
+        assert_eq!(
+            cfg.rate_limit.routes.get("POST /login").map(String::as_str),
+            Some("5/minute")
+        );
         assert_eq!(cfg.trusted_proxies.ranges.len(), 2);
         assert_eq!(cfg.access_log.format, AccessLogFormat::Json);
     }

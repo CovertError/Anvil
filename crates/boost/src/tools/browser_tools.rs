@@ -71,7 +71,10 @@ impl Tool for BrowserScreenshot {
         };
         let width = args.get("width").and_then(|v| v.as_u64()).unwrap_or(1280) as u32;
         let height = args.get("height").and_then(|v| v.as_u64()).unwrap_or(800) as u32;
-        let full_page = args.get("full_page").and_then(|v| v.as_bool()).unwrap_or(false);
+        let full_page = args
+            .get("full_page")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         let page = match self.manager.open(&url).await {
             Ok(p) => p,
@@ -281,10 +284,7 @@ impl Tool for BrowserNetwork {
         }
         let _ = page.close().await;
 
-        let entries: Vec<Value> = by_id
-            .into_iter()
-            .map(|(_, v)| Value::Object(v))
-            .collect();
+        let entries: Vec<Value> = by_id.into_iter().map(|(_, v)| Value::Object(v)).collect();
         CallToolResult::json(&json!({
             "url": url,
             "count": entries.len(),
@@ -385,8 +385,15 @@ impl Tool for BrowserFill {
             Some(s) if !s.is_empty() => s.to_string(),
             _ => return CallToolResult::error("`selector` is required"),
         };
-        let value = args.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let submit = args.get("submit").and_then(|v| v.as_bool()).unwrap_or(false);
+        let value = args
+            .get("value")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let submit = args
+            .get("submit")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let wait_ms = args.get("wait_ms").and_then(|v| v.as_u64()).unwrap_or(500);
 
         let page = match self.manager.open(&url).await {
@@ -459,7 +466,11 @@ impl Tool for BrowserType {
             Some(s) if !s.is_empty() => s.to_string(),
             _ => return CallToolResult::error("`selector` is required"),
         };
-        let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let text = args
+            .get("text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
 
         let page = match self.manager.open(&url).await {
             Ok(p) => p,
@@ -521,7 +532,10 @@ impl Tool for BrowserWaitFor {
             Some(s) if !s.is_empty() => s.to_string(),
             _ => return CallToolResult::error("`selector` is required"),
         };
-        let timeout_ms = args.get("timeout_ms").and_then(|v| v.as_u64()).unwrap_or(5000);
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(5000);
         let poll_ms = args.get("poll_ms").and_then(|v| v.as_u64()).unwrap_or(100);
 
         let page = match self.manager.open(&url).await {

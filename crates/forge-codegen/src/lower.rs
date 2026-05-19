@@ -44,8 +44,7 @@ pub fn lower_with_target(tokens: &[Token], target: LowerTarget) -> String {
 
             Token::Directive { name, args } => {
                 let args_inner = args.as_deref().unwrap_or("").trim();
-                let args_stripped_quotes =
-                    args_inner.trim_matches(|c| c == '"' || c == '\'');
+                let args_stripped_quotes = args_inner.trim_matches(|c| c == '"' || c == '\'');
 
                 match name.as_str() {
                     // ─── Control flow ──────────────────────────────────────
@@ -559,7 +558,9 @@ fn parse_yield_args(args: &str) -> (String, String) {
         return (n, d);
     }
     (
-        args.trim().trim_matches(|c| c == '"' || c == '\'').to_string(),
+        args.trim()
+            .trim_matches(|c| c == '"' || c == '\'')
+            .to_string(),
         String::new(),
     )
 }
@@ -574,7 +575,9 @@ fn parse_old_args(args: &str) -> (String, String) {
         return (f, d);
     }
     (
-        args.trim().trim_matches(|c| c == '"' || c == '\'').to_string(),
+        args.trim()
+            .trim_matches(|c| c == '"' || c == '\'')
+            .to_string(),
         "\"\"".to_string(),
     )
 }
@@ -677,7 +680,8 @@ fn parse_spark_args(args: &str) -> (String, String) {
         return (name, props);
     }
     (
-        args.trim_matches(|c: char| c == '"' || c == '\'').to_string(),
+        args.trim_matches(|c: char| c == '"' || c == '\'')
+            .to_string(),
         String::new(),
     )
 }

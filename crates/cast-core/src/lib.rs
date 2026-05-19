@@ -12,9 +12,9 @@ pub mod schema;
 
 pub use column::{Column, ColumnRef};
 pub use error::{Error, Result};
+pub use migration::MigrationStatus;
 pub use migration::{Migration, MigrationRunner};
 pub use model::{registered_models, Loaded, Model, ModelRegistration};
-pub use migration::MigrationStatus;
 pub use paginator::Paginator;
 pub use pool::{connect, Connection, ConnectionManager, Driver, Pool};
 pub use query::QueryBuilder;

@@ -1,7 +1,7 @@
 //! Application bootstrap. Wires middleware, routes, services.
 
-use anvilforge::prelude::*;
 use anvil_core::Application;
+use anvilforge::prelude::*;
 
 use crate::routes;
 
@@ -13,11 +13,13 @@ pub async fn build(container: Container) -> anyhow::Result<Application> {
 
     let app = Application::builder()
         .container(|_b| {
-            anvil_core::container::ContainerBuilder::from_env()
-                .driver_pool(container.driver_pool())
+            anvil_core::container::ContainerBuilder::from_env().driver_pool(container.driver_pool())
         })
         .middleware(|registry| {
-            registry.register("require_auth", crate::routes::middleware::require_auth_passthrough);
+            registry.register(
+                "require_auth",
+                crate::routes::middleware::require_auth_passthrough,
+            );
         })
         .web(::spark::install(routes::web::register))
         .api(routes::api::register)

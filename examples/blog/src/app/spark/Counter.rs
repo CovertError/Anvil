@@ -15,7 +15,9 @@ impl Counter {
     #[spark_mount]
     fn mount(props: MountProps) -> Self {
         Self {
-            label: props.string("label").unwrap_or_else(|| "Clicks".to_string()),
+            label: props
+                .string("label")
+                .unwrap_or_else(|| "Clicks".to_string()),
             count: props.i32("initial").unwrap_or(0),
             draft: String::new(),
         }

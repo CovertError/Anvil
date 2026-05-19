@@ -159,7 +159,9 @@ impl ContainerBuilder {
     /// Wrap a single Postgres pool as the default connection. Convenience for
     /// single-DB apps using Postgres.
     pub fn pool(mut self, pool: Pool) -> Self {
-        self.connections = Some(ConnectionManager::from_pool(cast_core::Pool::Postgres(pool)));
+        self.connections = Some(ConnectionManager::from_pool(cast_core::Pool::Postgres(
+            pool,
+        )));
         self
     }
 

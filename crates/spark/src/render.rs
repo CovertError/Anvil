@@ -51,7 +51,10 @@ where
     F: std::future::Future<Output = T>,
 {
     REQUEST_MOUNTS
-        .scope(Mutex::new(Vec::new()), CURRENT_CSRF.scope(String::new(), fut))
+        .scope(
+            Mutex::new(Vec::new()),
+            CURRENT_CSRF.scope(String::new(), fut),
+        )
         .await
 }
 
@@ -146,10 +149,8 @@ pub fn render_mount(name: &str, props: &serde_json::Value) -> Result<String> {
 pub fn boot_script() -> String {
     let mounts = drain_mounts();
     let csrf = current_csrf();
-    let endpoint =
-        std::env::var("SPARK_UPDATE_PATH").unwrap_or_else(|_| "/_spark/update".into());
-    let runtime =
-        std::env::var("SPARK_RUNTIME_PATH").unwrap_or_else(|_| "/_spark/spark.js".into());
+    let endpoint = std::env::var("SPARK_UPDATE_PATH").unwrap_or_else(|_| "/_spark/update".into());
+    let runtime = std::env::var("SPARK_RUNTIME_PATH").unwrap_or_else(|_| "/_spark/spark.js".into());
 
     #[derive(Serialize)]
     struct Boot<'a> {

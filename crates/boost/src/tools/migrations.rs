@@ -23,26 +23,36 @@ impl Tool for ListMigrations {
 
         // Pull `name, batch, applied_at` from the migrations table. Handles a
         // missing table (fresh project) gracefully.
-        let rows: Result<Vec<(String, Option<i64>, Option<chrono::DateTime<chrono::Utc>>)>, _> = match pool {
-            cast_core::Pool::Postgres(p) => sqlx::query_as::<_, (String, Option<i64>, Option<chrono::DateTime<chrono::Utc>>)>(
-                "SELECT name, batch, applied_at FROM migrations ORDER BY id",
-            )
-            .fetch_all(&p)
-            .await
-            .map_err(|e| e.to_string()),
-            cast_core::Pool::MySql(p) => sqlx::query_as::<_, (String, Option<i64>, Option<chrono::DateTime<chrono::Utc>>)>(
-                "SELECT name, batch, applied_at FROM migrations ORDER BY id",
-            )
-            .fetch_all(&p)
-            .await
-            .map_err(|e| e.to_string()),
-            cast_core::Pool::Sqlite(p) => sqlx::query_as::<_, (String, Option<i64>, Option<chrono::DateTime<chrono::Utc>>)>(
-                "SELECT name, batch, applied_at FROM migrations ORDER BY id",
-            )
-            .fetch_all(&p)
-            .await
-            .map_err(|e| e.to_string()),
-        };
+        let rows: Result<Vec<(String, Option<i64>, Option<chrono::DateTime<chrono::Utc>>)>, _> =
+            match pool {
+                cast_core::Pool::Postgres(p) => sqlx::query_as::<
+                    _,
+                    (String, Option<i64>, Option<chrono::DateTime<chrono::Utc>>),
+                >(
+                    "SELECT name, batch, applied_at FROM migrations ORDER BY id",
+                )
+                .fetch_all(&p)
+                .await
+                .map_err(|e| e.to_string()),
+                cast_core::Pool::MySql(p) => sqlx::query_as::<
+                    _,
+                    (String, Option<i64>, Option<chrono::DateTime<chrono::Utc>>),
+                >(
+                    "SELECT name, batch, applied_at FROM migrations ORDER BY id",
+                )
+                .fetch_all(&p)
+                .await
+                .map_err(|e| e.to_string()),
+                cast_core::Pool::Sqlite(p) => sqlx::query_as::<
+                    _,
+                    (String, Option<i64>, Option<chrono::DateTime<chrono::Utc>>),
+                >(
+                    "SELECT name, batch, applied_at FROM migrations ORDER BY id",
+                )
+                .fetch_all(&p)
+                .await
+                .map_err(|e| e.to_string()),
+            };
 
         let applied = match rows {
             Ok(rows) => rows,

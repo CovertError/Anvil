@@ -33,10 +33,7 @@ pub fn push(name: &str, content: &str) {
             .push(content.to_string());
     });
     // Best-effort fallback for non-task contexts:
-    if REQUEST_STACKS
-        .try_with(|_| ())
-        .is_err()
-    {
+    if REQUEST_STACKS.try_with(|_| ()).is_err() {
         GLOBAL_STACKS
             .lock()
             .entry(name.to_string())

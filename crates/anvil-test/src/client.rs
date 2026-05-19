@@ -115,14 +115,11 @@ impl TestClient {
     async fn send(&self, req: Request<Body>) -> TestResponse {
         let mut req = req;
         for (name, value) in &self.base_headers {
-            req.headers_mut().entry(name.clone()).or_insert_with(|| value.clone());
+            req.headers_mut()
+                .entry(name.clone())
+                .or_insert_with(|| value.clone());
         }
-        let response = self
-            .router
-            .clone()
-            .oneshot(req)
-            .await
-            .unwrap();
+        let response = self.router.clone().oneshot(req).await.unwrap();
 
         let status = response.status();
         let headers = response.headers().clone();
@@ -255,7 +252,9 @@ impl TestResponse {
     }
 
     pub fn header(&self, name: &str) -> Option<String> {
-        self.headers.get(name).and_then(|v| v.to_str().ok().map(String::from))
+        self.headers
+            .get(name)
+            .and_then(|v| v.to_str().ok().map(String::from))
     }
 
     // ─── Body helpers ──────────────────────────────────────────────────────
@@ -351,12 +350,10 @@ impl TestResponse {
 fn json_contains(actual: &serde_json::Value, expected: &serde_json::Value) -> bool {
     use serde_json::Value::*;
     match (actual, expected) {
-        (Object(a), Object(e)) => e.iter().all(|(k, ev)| {
-            a.get(k).map_or(false, |av| json_contains(av, ev))
-        }),
-        (Array(a), Array(e)) => e
+        (Object(a), Object(e)) => e
             .iter()
-            .all(|ev| a.iter().any(|av| json_contains(av, ev))),
+            .all(|(k, ev)| a.get(k).map_or(false, |av| json_contains(av, ev))),
+        (Array(a), Array(e)) => e.iter().all(|ev| a.iter().any(|av| json_contains(av, ev))),
         (a, e) => a == e,
     }
 }

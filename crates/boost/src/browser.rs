@@ -54,9 +54,11 @@ impl BrowserManager {
         let config = BrowserConfig::builder()
             .build()
             .map_err(|e| format!("browser config: {e}"))?;
-        let (browser, mut handler) = Browser::launch(config)
-            .await
-            .map_err(|e| format!("launch chromium: {e}. Install Chrome/Chromium or set CHROME env var to its path."))?;
+        let (browser, mut handler) = Browser::launch(config).await.map_err(|e| {
+            format!(
+                "launch chromium: {e}. Install Chrome/Chromium or set CHROME env var to its path."
+            )
+        })?;
 
         // Drain DevTools events forever so pages remain responsive.
         tokio::spawn(async move {

@@ -38,9 +38,16 @@ impl fmt::Display for Token {
             Token::Text(s) => write!(f, "{s}"),
             Token::EscapedExpr(e) => write!(f, "{{{{ {e} }}}}"),
             Token::RawExpr(e) => write!(f, "{{!! {e} !!}}"),
-            Token::Directive { name, args: Some(a) } => write!(f, "@{name}({a})"),
+            Token::Directive {
+                name,
+                args: Some(a),
+            } => write!(f, "@{name}({a})"),
             Token::Directive { name, args: None } => write!(f, "@{name}"),
-            Token::ComponentOpen { name, attrs, self_closing } => {
+            Token::ComponentOpen {
+                name,
+                attrs,
+                self_closing,
+            } => {
                 write!(f, "<x-{name}")?;
                 for (k, v) in attrs {
                     write!(f, " {k}=\"{v}\"")?;
@@ -64,7 +71,11 @@ pub fn tokenize(input: &str) -> Vec<Token> {
 
     while i < bytes.len() {
         // {{ ... }}
-        if i + 1 < bytes.len() && bytes[i] == b'{' && bytes[i + 1] == b'{' && !(i + 2 < bytes.len() && bytes[i + 2] == b'-' /* askama escape */) {
+        if i + 1 < bytes.len()
+            && bytes[i] == b'{'
+            && bytes[i + 1] == b'{'
+            && !(i + 2 < bytes.len() && bytes[i + 2] == b'-'/* askama escape */)
+        {
             flush_text(input, text_start, i, &mut tokens);
             if let Some(end) = find_close(&input[i + 2..], "}}") {
                 let expr = input[i + 2..i + 2 + end].trim().to_string();
@@ -88,7 +99,10 @@ pub fn tokenize(input: &str) -> Vec<Token> {
         }
 
         // @directive
-        if bytes[i] == b'@' && i + 1 < bytes.len() && (bytes[i + 1].is_ascii_alphabetic() || bytes[i + 1] == b'_') {
+        if bytes[i] == b'@'
+            && i + 1 < bytes.len()
+            && (bytes[i + 1].is_ascii_alphabetic() || bytes[i + 1] == b'_')
+        {
             // Escape sequence: `@@` → literal `@`
             if i + 1 < bytes.len() && bytes[i + 1] == b'@' {
                 // shouldn't reach here since we check alphabetic above
@@ -96,7 +110,9 @@ pub fn tokenize(input: &str) -> Vec<Token> {
             flush_text(input, text_start, i, &mut tokens);
             let dir_start = i + 1;
             let mut dir_end = dir_start;
-            while dir_end < bytes.len() && (bytes[dir_end].is_ascii_alphanumeric() || bytes[dir_end] == b'_') {
+            while dir_end < bytes.len()
+                && (bytes[dir_end].is_ascii_alphanumeric() || bytes[dir_end] == b'_')
+            {
                 dir_end += 1;
             }
             let name = input[dir_start..dir_end].to_string();
@@ -141,7 +157,12 @@ pub fn tokenize(input: &str) -> Vec<Token> {
         }
 
         // </x-component>
-        if bytes[i] == b'<' && i + 3 < bytes.len() && bytes[i + 1] == b'/' && bytes[i + 2] == b'x' && bytes[i + 3] == b'-' {
+        if bytes[i] == b'<'
+            && i + 3 < bytes.len()
+            && bytes[i + 1] == b'/'
+            && bytes[i + 2] == b'x'
+            && bytes[i + 3] == b'-'
+        {
             flush_text(input, text_start, i, &mut tokens);
             let after = &input[i + 4..];
             let name_end = after.find('>').unwrap_or(after.len());

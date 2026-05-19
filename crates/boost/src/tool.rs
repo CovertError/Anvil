@@ -8,8 +8,8 @@ use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
 
-use anvil_core::Container;
 use anvil_core::Application;
+use anvil_core::Container;
 
 use crate::protocol::CallToolResult;
 

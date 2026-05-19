@@ -17,7 +17,10 @@ fn forge_preprocessor_lowers_blade_directives_to_askama() {
 @endsection"#;
 
     let lowered = compile_source(source);
-    assert!(lowered.contains(r#"{% extends "layouts/app.html" %}"#), "extends: {lowered}");
+    assert!(
+        lowered.contains(r#"{% extends "layouts/app.html" %}"#),
+        "extends: {lowered}"
+    );
     assert!(lowered.contains("{% block content %}"));
     assert!(lowered.contains("{% endblock %}"));
     assert!(lowered.contains("{% for item in items %}"));
@@ -47,8 +50,8 @@ fn forge_push_stack_emit_placeholders() {
 
 #[test]
 fn cast_model_query_builder_is_type_safe() {
-    use cast::Model;
     use blog::app::models::Post;
+    use cast::Model;
     // Compile-time check only — does not actually execute.
     async fn _check(pool: &sqlx::PgPool) {
         let _posts: Vec<Post> = Post::query()
@@ -76,7 +79,8 @@ fn anvil_error_into_response_has_correct_status() {
 
 #[test]
 fn forge_forelse_lowers_to_for_with_else() {
-    let source = "@forelse(posts as post)<li>{{ post.title }}</li>@empty<li>No posts</li>@endforelse";
+    let source =
+        "@forelse(posts as post)<li>{{ post.title }}</li>@empty<li>No posts</li>@endforelse";
     let lowered = compile_source(source);
     assert!(lowered.contains("{% for post in posts %}"));
     assert!(lowered.contains("{% endfor %}"));
@@ -87,7 +91,10 @@ fn forge_forelse_lowers_to_for_with_else() {
 #[test]
 fn forge_form_attribute_helpers_emit_conditionals() {
     let lowered = compile_source("@checked(is_admin)");
-    assert!(lowered.contains("{% if (is_admin) %}checked{% endif %}"), "got: {lowered}");
+    assert!(
+        lowered.contains("{% if (is_admin) %}checked{% endif %}"),
+        "got: {lowered}"
+    );
 
     let lowered = compile_source("@disabled(!can_edit)");
     assert!(lowered.contains("disabled{% endif %}"), "got: {lowered}");
@@ -152,14 +159,23 @@ fn forge_dump_emits_pre_block() {
 #[test]
 fn forge_json_directive_emits_serde_json() {
     let lowered = compile_source("@json(payload)");
-    assert!(lowered.contains("::serde_json::to_string"), "got: {lowered}");
+    assert!(
+        lowered.contains("::serde_json::to_string"),
+        "got: {lowered}"
+    );
 }
 
 #[test]
 fn forge_push_once_emits_distinct_marker() {
     let lowered = compile_source(r#"@pushOnce("scripts")<script></script>@endPushOnce"#);
-    assert!(lowered.contains("<!--FORGE-PUSHONCE-START:scripts-->"), "got: {lowered}");
-    assert!(lowered.contains("<!--FORGE-PUSHONCE-END:"), "got: {lowered}");
+    assert!(
+        lowered.contains("<!--FORGE-PUSHONCE-START:scripts-->"),
+        "got: {lowered}"
+    );
+    assert!(
+        lowered.contains("<!--FORGE-PUSHONCE-END:"),
+        "got: {lowered}"
+    );
 }
 
 #[test]
