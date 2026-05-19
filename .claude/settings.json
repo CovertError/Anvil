@@ -1,5 +1,13 @@
 {
   "enabledPlugins": {
     "agent-skills@addy-agent-skills": true
+  },
+  "permissions": {
+    "allow": [
+      "Bash(git tag:*)",
+      "Bash(git push origin v0.3.0)",
+      "Bash(gh release create:*)",
+      "Bash(cargo publish -p anvilforge*)"
+    ]
   }
 }

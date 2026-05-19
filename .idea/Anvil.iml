@@ -16,6 +16,17 @@
       <sourceFolder url="file://$MODULE_DIR$/examples/blog/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/examples/blog/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/anvil-dev/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/anvil-test/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/bellows/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/boost/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/spark-derive/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/spark/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/spark/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/spark/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/examples/hot-demo-handlers/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/examples/hot-demo/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/tools/http-bench/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />
