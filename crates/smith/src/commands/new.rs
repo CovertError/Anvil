@@ -3,8 +3,10 @@
 //!
 //! Top-level dirs (`app/`, `bootstrap/`, `config/`, `database/`, `routes/`,
 //! `resources/`, `storage/`, `tests/`, `lang/`, `public/`) live at the project
-//! root, exactly as Laravel does it. The Rust source tree is just a thin
-//! `src/main.rs` + `src/lib.rs` shim that points at those dirs via `#[path]`.
+//! root, exactly as Laravel does it. The Rust entry-point glue
+//! (`main.rs` + `lib.rs` + `build.rs`) is tucked away in `vendor/anvil/` —
+//! framework-owned shims the user never edits, analogous to Laravel's
+//! `vendor/laravel/framework/`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -32,7 +34,7 @@ pub fn run(target: &str) -> Result<()> {
 
     create_directories(&root)?;
     write_root_files(&root, &pkg_name)?;
-    write_src_shim(&root, &pkg_name)?;
+    write_vendor_shim(&root, &pkg_name)?;
     write_app(&root)?;
     write_bootstrap(&root)?;
     write_config(&root)?;
@@ -56,14 +58,14 @@ pub fn run(target: &str) -> Result<()> {
     println!("    anvil serve");
     println!();
     println!("  layout: top-level app/, bootstrap/, config/, etc. — Laravel-style.");
-    println!("  Rust source: src/main.rs + src/lib.rs shim; everything else lives outside src/.");
+    println!("  framework shims live in vendor/anvil/ — you never edit them.");
     println!();
     Ok(())
 }
 
 fn create_directories(root: &Path) -> Result<()> {
     let dirs = [
-        "src",
+        "vendor/anvil",
         "app/Console",
         "app/Events",
         "app/Exceptions",
@@ -120,13 +122,14 @@ fn write_root_files(root: &Path, name: &str) -> Result<()> {
 name = "{name}"
 version = "0.1.0"
 edition = "2021"
+build = "vendor/anvil/build.rs"
 
 [[bin]]
 name = "{name}"
-path = "src/main.rs"
+path = "vendor/anvil/main.rs"
 
 [lib]
-path = "src/lib.rs"
+path = "vendor/anvil/lib.rs"
 
 [dependencies]
 anvilforge = {anvilforge_dep}
@@ -229,23 +232,6 @@ components = ["rustfmt", "clippy"]
 
     write(
         root,
-        "build.rs",
-        r#"//! Build script — compiles Forge templates to Askama at build time.
-
-fn main() {
-    println!("cargo:rerun-if-changed=resources/views");
-    if let Err(e) = forge_codegen::compile_dir(
-        std::path::Path::new("resources/views"),
-        std::path::Path::new("target/forge"),
-    ) {
-        eprintln!("cargo:warning=forge codegen: {e}");
-    }
-}
-"#,
-    )?;
-
-    write(
-        root,
         "vite.config.js",
         r#"import { defineConfig } from 'vite';
 
@@ -318,7 +304,7 @@ resources/  Forge templates + frontend source
 routes/     web, api, channels, console route definitions
 storage/    local files, logs, framework cache
 tests/      Feature/ and Unit/ test suites
-src/        Rust entry (main.rs + lib.rs glue)
+vendor/     framework shims (main.rs/lib.rs/build.rs) — never edit
 ```
 
 ## Useful commands
@@ -343,42 +329,60 @@ anvil test                       # run tests
     Ok(())
 }
 
-// ─── src/ shim ──────────────────────────────────────────────────────────────
+// ─── vendor/anvil/ shim ─────────────────────────────────────────────────────
 
-fn write_src_shim(root: &Path, pkg_name: &str) -> Result<()> {
+fn write_vendor_shim(root: &Path, pkg_name: &str) -> Result<()> {
     let crate_name = pkg_name.replace('-', "_");
 
     write(
         root,
-        "src/lib.rs",
+        "vendor/anvil/lib.rs",
         r#"//! Library shim — glues Laravel-style top-level directories into the Rust
-//! module tree via `#[path]` attributes.
+//! module tree via `#[path]` attributes. Framework-owned, don't edit.
 
 #![allow(non_snake_case)]
 
-#[path = "../app/mod.rs"]
+#[path = "../../app/mod.rs"]
 pub mod app;
 
-#[path = "../bootstrap/mod.rs"]
+#[path = "../../bootstrap/mod.rs"]
 pub mod bootstrap;
 
-#[path = "../config/mod.rs"]
+#[path = "../../config/mod.rs"]
 pub mod config;
 
-#[path = "../database/mod.rs"]
+#[path = "../../database/mod.rs"]
 pub mod database;
 
-#[path = "../lang/mod.rs"]
+#[path = "../../lang/mod.rs"]
 pub mod lang;
 
-#[path = "../routes/mod.rs"]
+#[path = "../../routes/mod.rs"]
 pub mod routes;
 "#,
     )?;
 
     write(
         root,
-        "src/main.rs",
+        "vendor/anvil/build.rs",
+        r#"//! Build script — compiles Forge templates to Askama at build time.
+//! Framework-owned, don't edit.
+
+fn main() {
+    println!("cargo:rerun-if-changed=resources/views");
+    if let Err(e) = forge_codegen::compile_dir(
+        std::path::Path::new("resources/views"),
+        std::path::Path::new("target/forge"),
+    ) {
+        eprintln!("cargo:warning=forge codegen: {e}");
+    }
+}
+"#,
+    )?;
+
+    write(
+        root,
+        "vendor/anvil/main.rs",
         &format!(
             r#"//! Entry point — dispatches subcommands and calls `bootstrap::app::build`.
 
@@ -644,7 +648,7 @@ pub use kernel::Kernel;
     write(
         root,
         "app/Console/Kernel.rs",
-        r#"//! App-level CLI commands. `src/main.rs` handles framework subcommand
+        r#"//! App-level CLI commands. `vendor/anvil/main.rs` handles framework subcommand
 //! dispatch; extend here to register custom commands.
 
 pub struct Kernel;

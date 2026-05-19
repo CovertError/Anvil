@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-05-19
+
+**"Clean Bench."** `anvil new` now scaffolds a Laravel-clean project root.
+Framework-owned shims (`main.rs`, `lib.rs`, `build.rs`) live in `vendor/anvil/`
+instead of `src/` — analogous to how Laravel hides framework code under
+`vendor/laravel/framework/`. The project root is now ten user-owned dirs and
+the standard manifest files; nothing else.
+
+### Changed
+
+- **`anvil new`** — scaffolded projects no longer contain a `src/` directory.
+  `main.rs`, `lib.rs`, and `build.rs` are emitted under `vendor/anvil/`, and
+  the generated `Cargo.toml` points `[[bin]] path`, `[lib] path`, and
+  `[package] build` at those paths. The `#[path]` attributes in `lib.rs` are
+  updated to walk up two levels (`../../app/mod.rs` etc.).
+- README template and `app/Console/Kernel.rs` doc comments updated to reference
+  `vendor/anvil/main.rs` instead of `src/main.rs`.
+
+### Notes
+
+- `rust-toolchain.toml` stays at the project root — rustup walks **up** from
+  cwd looking for it and would silently miss it inside `vendor/anvil/`.
+- No runtime, API, or framework behavior changes. Existing 0.3.0 projects
+  continue to work unchanged; this only affects projects newly scaffolded
+  with `anvil new` on 0.3.1+.
+
 ## [0.3.0] — 2026-05-19
 
 **"The Forge Lights Up."** The release that takes Anvilforge from a Laravel-shaped
