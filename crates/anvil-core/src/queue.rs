@@ -92,13 +92,24 @@ impl QueueHandle {
         Self { driver, registry }
     }
 
+    /// Build an in-memory queue. Works for any driver — pool ignored.
+    /// The `_pool` parameter is kept for ergonomics: many call sites already
+    /// have a pool handy, no need to omit the argument at every call.
     pub fn in_memory(_pool: PgPool) -> Self {
+        Self::in_memory_no_pool()
+    }
+
+    /// In-memory queue without requiring a pool reference. Useful for tests
+    /// and for MySQL/SQLite apps where there's no PG pool to pass.
+    pub fn in_memory_no_pool() -> Self {
         Self {
             driver: Arc::new(InMemoryDriver::default()),
             registry: collect_inventory_registry(),
         }
     }
 
+    /// Database-backed queue. Postgres-only in v0.1 (uses `SKIP LOCKED`).
+    /// MySQL + SQLite database queue drivers are deferred to v0.2.
     pub fn database(pool: PgPool) -> Self {
         Self {
             driver: Arc::new(DatabaseDriver { pool }),

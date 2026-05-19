@@ -10,13 +10,20 @@ members = [
     "crates/cast-derive",
     "crates/forge",
     "crates/forge-codegen",
-    "crates/reverb",
+    "crates/anvil-dev",
+    "crates/bellows",
+    "crates/boost",
     "crates/smith",
+    "crates/spark",
+    "crates/spark-derive",
     "examples/blog",
+    "examples/hot-demo",
+    "examples/hot-demo-handlers",
+    "tools/http-bench",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 authors = ["Anvilforge contributors"]
@@ -34,12 +41,15 @@ pin-project-lite = "0.2"
 
 # HTTP
 axum = { version = "0.7", features = ["macros", "ws", "multipart"] }
-tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.5", features = ["trace", "cors", "compression-gzip", "fs", "limit"] }
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+tower = { version = "0.5", features = ["util", "timeout"] }
+tower-http = { version = "0.5", features = ["trace", "cors", "compression-gzip", "compression-br", "fs", "limit", "timeout", "set-header"] }
 tower-sessions = "0.13"
 hyper = "1.4"
 http = "1.1"
 http-body-util = "0.1"
+rustls-pemfile = "2.1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "gzip"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -51,12 +61,13 @@ thiserror = "1.0"
 anyhow = "1.0"
 
 # Database / ORM substrate
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "macros", "chrono", "uuid", "json"] }
-sea-query = { version = "0.32", features = ["backend-postgres", "with-chrono", "with-uuid", "with-json"] }
-sea-query-binder = { version = "0.7", features = ["sqlx-postgres", "with-chrono", "with-uuid", "with-json"] }
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "mysql", "sqlite", "macros", "chrono", "uuid", "json", "any"] }
+sea-query = { version = "0.32", features = ["backend-postgres", "backend-mysql", "backend-sqlite", "with-chrono", "with-uuid", "with-json"] }
+sea-query-binder = { version = "0.7", features = ["sqlx-postgres", "sqlx-mysql", "sqlx-sqlite", "with-chrono", "with-uuid", "with-json"] }
 
 # Templates
 askama = "0.12"
+minijinja = { version = "2.0", features = ["loader"] }
 
 # Proc macros
 syn = { version = "2.0", features = ["full", "extra-traits"] }
@@ -73,6 +84,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"]
 
 # Config & env
 dotenvy = "0.15"
+toml = "0.8"
+ipnet = { version = "2.9", features = ["serde"] }
 
 # Hashing & crypto
 argon2 = "0.5"
@@ -80,6 +93,7 @@ rand = "0.8"
 sha2 = "0.10"
 hmac = "0.12"
 base64 = "0.22"
+aes-gcm = "0.10"
 
 # Validation
 garde = { version = "0.20", features = ["full"] }
@@ -88,7 +102,7 @@ garde = { version = "0.20", features = ["full"] }
 object_store = { version = "0.11", features = ["aws", "gcp"] }
 
 # Cache
-moka = { version = "0.12", features = ["future"] }
+moka = { version = "0.12", features = ["future", "sync"] }
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 
 # Mail
@@ -106,6 +120,12 @@ inquire = "0.7"
 # Faker
 fake = { version = "3.0", features = ["derive", "chrono", "uuid"] }
 
+# Benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# Browser automation (Playwright-equivalent via Chrome DevTools Protocol).
+chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
+
 # Utilities
 uuid = { version = "1.10", features = ["v4", "v7", "serde"] }
 once_cell = "1.20"
@@ -118,6 +138,13 @@ tokio-tungstenite = "0.24"
 itertools = "0.13"
 indexmap = { version = "2.6", features = ["serde"] }
 regex = "1.11"
+paste = "1.0"
+
+# Hot-reload of user code via dylib swap. Closes most of the dev-loop gap
+# vs Laravel for the "edit handler → see it run" cycle.
+hot-lib-reloader = "0.7"
+libloading = "0.8"
+
 url = "2.5"
 bytes = "1.7"
 mime = "0.3"
@@ -126,21 +153,38 @@ mime_guess = "2.0"
 # Internal crates — published names use `anvilforge-*` prefix.
 # Workspace dep keys match published names; [lib].name fields preserve the old
 # import names (`cast`, `forge`, `reverb`, etc.) so internal code is untouched.
-anvilforge = { path = "crates/anvil", version = "0.1.0" }
-anvilforge-core = { path = "crates/anvil-core", version = "0.1.0" }
-anvilforge-derive = { path = "crates/anvil-derive", version = "0.1.0" }
-anvilforge-test = { path = "crates/anvil-test", version = "0.1.0" }
-anvilforge-cast = { path = "crates/cast", version = "0.1.0" }
-anvilforge-cast-core = { path = "crates/cast-core", version = "0.1.0" }
-anvilforge-cast-derive = { path = "crates/cast-derive", version = "0.1.0" }
-anvilforge-templates = { path = "crates/forge", version = "0.1.0" }
-anvilforge-templates-codegen = { path = "crates/forge-codegen", version = "0.1.0" }
-anvilforge-broadcast = { path = "crates/reverb", version = "0.1.0" }
+anvilforge = { path = "crates/anvil", version = "0.3.0" }
+anvilforge-core = { path = "crates/anvil-core", version = "0.3.0" }
+anvilforge-derive = { path = "crates/anvil-derive", version = "0.3.0" }
+anvilforge-test = { path = "crates/anvil-test", version = "0.3.0" }
+anvilforge-cast = { path = "crates/cast", version = "0.3.0" }
+anvilforge-cast-core = { path = "crates/cast-core", version = "0.3.0" }
+anvilforge-cast-derive = { path = "crates/cast-derive", version = "0.3.0" }
+anvilforge-templates = { path = "crates/forge", version = "0.3.0" }
+anvilforge-templates-codegen = { path = "crates/forge-codegen", version = "0.3.0" }
+anvilforge-bellows = { path = "crates/bellows", version = "0.3.0" }
+anvilforge-boost = { path = "crates/boost", version = "0.3.0" }
+anvilforge-dev = { path = "crates/anvil-dev", version = "0.3.0" }
+anvilforge-spark = { path = "crates/spark", version = "0.3.0" }
+anvilforge-spark-derive = { path = "crates/spark-derive", version = "0.3.0" }
 
 [profile.dev]
 opt-level = 0
-debug = true
+# Line-tables-only keeps backtraces useful but cuts debug-info size + link time
+# roughly in half. Combined with split-debuginfo = "unpacked", the linker
+# doesn't have to copy a giant debug blob into every binary.
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
 incremental = true
+# More codegen units = more parallelism inside a single crate compile.
+codegen-units = 256
+
+# Dependencies are opaque to your dev loop — cargo caches them and you never
+# recompile them on edits. Drop debug info for them entirely; saves a lot of
+# linker time without affecting backtraces in your own code.
+[profile.dev.package."*"]
+opt-level = 0
+debug = false
 
 [profile.release]
 opt-level = 3

@@ -1,0 +1,22 @@
+<div style="border:1px solid #ddd;padding:1rem;border-radius:6px;margin:1rem 0;">
+    <p><strong>{{ label }}:</strong> <span data-test="count">{{ count }}</span></p>
+
+    <p>
+        <button spark:click="increment" spark:loading.attr="disabled">+1</button>
+        <button spark:click="add(5)" spark:loading.attr="disabled">+5</button>
+        <button spark:click="reset" spark:loading.attr="disabled">reset</button>
+    </p>
+
+    <p>
+        <label>
+            Draft (two-way bound):
+            <input spark:model.live="draft" placeholder="type here">
+        </label>
+    </p>
+
+    @if (draft != "")
+        <p>Echoing draft: <code>{{ draft }}</code></p>
+    @endif
+
+    <p spark:loading style="color:#888;font-style:italic;">updating…</p>
+</div>

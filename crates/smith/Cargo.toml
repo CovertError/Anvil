@@ -12,7 +12,7 @@ keywords = ["web", "framework", "cli", "scaffold", "anvilforge"]
 categories = ["command-line-utilities", "web-programming", "development-tools"]
 
 [[bin]]
-name = "smith"
+name = "anvil"
 path = "src/main.rs"
 
 [dependencies]

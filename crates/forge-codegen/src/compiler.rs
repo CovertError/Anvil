@@ -1,16 +1,26 @@
-//! Compile Forge templates to Askama templates. Driven from `build.rs`.
+//! Compile Forge templates to Askama (compile-time, build.rs path) or to a
+//! MiniJinja-compatible runtime form used by Spark.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use walkdir::WalkDir;
 
-use crate::lower::lower;
+use crate::lower::{lower, lower_with_target, LowerTarget};
 use crate::parser::tokenize;
 
 pub fn compile_source(source: &str) -> String {
     let tokens = tokenize(source);
     lower(&tokens)
+}
+
+/// Lower a Forge source string into MiniJinja-compatible syntax. Spark
+/// directives (`@spark`, `@sparkScripts`) emit function calls bound to
+/// MiniJinja's global function table; other directives behave the same as the
+/// Askama path for now.
+pub fn compile_source_runtime(source: &str) -> String {
+    let tokens = tokenize(source);
+    lower_with_target(&tokens, LowerTarget::MiniJinja)
 }
 
 pub fn compile_file(input: &Path, output: &Path) -> std::io::Result<()> {

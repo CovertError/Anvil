@@ -1,0 +1,20 @@
+[package]
+name = "hot-demo"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[[bin]]
+name = "hot-demo"
+path = "src/main.rs"
+
+[dependencies]
+hot-demo-handlers = { path = "../hot-demo-handlers" }
+hot-lib-reloader = { workspace = true }
+
+tokio = { workspace = true }
+axum = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+parking_lot = { workspace = true }

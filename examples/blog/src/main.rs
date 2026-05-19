@@ -28,6 +28,9 @@ async fn main() -> Result<()> {
         "db:seed" => run_seed().await,
         "queue:work" => run_queue_worker().await,
         "schedule:run" => run_schedule().await,
+        "routes" => run_routes(&args).await,
+        "mcp" => run_mcp().await,
+        "boost:install" => run_boost_install(&args).await,
         other => {
             eprintln!("unknown subcommand: {other}");
             std::process::exit(2);
@@ -35,16 +38,90 @@ async fn main() -> Result<()> {
     }
 }
 
-async fn build_pool() -> Result<sqlx::PgPool> {
+async fn run_mcp() -> Result<()> {
+    let container = build_container().await?;
+    let app = bootstrap::app::build(container).await?;
+    boost::serve(&app).await?;
+    Ok(())
+}
+
+async fn run_boost_install(args: &[String]) -> Result<()> {
+    let force = args.iter().any(|a| a == "--force");
+    boost::install::scaffold(force).map_err(|e| anyhow::anyhow!(e))?;
+    Ok(())
+}
+
+async fn run_routes(args: &[String]) -> Result<()> {
+    let mut method_filter: Option<String> = None;
+    let mut prefix_filter: Option<String> = None;
+    let mut as_json = false;
+    let mut iter = args.iter().skip(2); // skip program name + "routes"
+    while let Some(a) = iter.next() {
+        match a.as_str() {
+            "--method" => method_filter = iter.next().cloned(),
+            "--prefix" => prefix_filter = iter.next().cloned(),
+            "--json" => as_json = true,
+            _ => {}
+        }
+    }
+
+    let container = build_container().await?;
+    let app = bootstrap::app::build(container).await?;
+    let mut routes: Vec<_> = app.routes().to_vec();
+    if let Some(m) = method_filter {
+        let m = m.to_ascii_uppercase();
+        routes.retain(|r| r.method.as_str().eq_ignore_ascii_case(&m));
+    }
+    if let Some(p) = prefix_filter {
+        routes.retain(|r| r.path.starts_with(&p));
+    }
+
+    if as_json {
+        let payload: Vec<_> = routes
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "method": r.method.to_string(),
+                    "path": r.path,
+                    "middleware": r.middleware,
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "[]".into())
+        );
+        return Ok(());
+    }
+
+    if routes.is_empty() {
+        println!("(no routes registered or matching the filter)");
+        return Ok(());
+    }
+    let width = routes.iter().map(|r| r.method.as_str().len()).max().unwrap_or(6);
+    for r in &routes {
+        let mw = if r.middleware.is_empty() {
+            String::new()
+        } else {
+            format!("  [{}]", r.middleware.join(", "))
+        };
+        println!("  {:<width$}  {}{}", r.method, r.path, mw, width = width);
+    }
+    println!();
+    println!("  {} route(s)", routes.len());
+    Ok(())
+}
+
+async fn build_pool() -> Result<cast::Pool> {
     let cfg = anvil_core::config::DatabaseConfig::from_env();
-    let pool = cast::connect(&cfg.url, cfg.pool_size).await?;
+    let pool = cast::connect(cfg.default_url(), cfg.default_pool_size()).await?;
     Ok(pool)
 }
 
 async fn build_container() -> Result<Container> {
     let pool = build_pool().await?;
     let container = ContainerBuilder::from_env()
-        .pool(pool)
+        .driver_pool(pool)
         .cache(CacheStore::moka(1024))
         .build();
     Ok(container)
@@ -53,10 +130,11 @@ async fn build_container() -> Result<Container> {
 async fn serve() -> Result<()> {
     let container = build_container().await?;
     let app = bootstrap::app::build(container).await?;
-    let addr: SocketAddr = std::env::var("APP_ADDR")
-        .unwrap_or_else(|_| "127.0.0.1:8080".to_string())
-        .parse()?;
-    app.serve(addr).await?;
+    // Honors config/anvil.toml + env overrides (APP_ADDR, TLS_CERT, TLS_KEY) for
+    // bind addr, TLS, compression, body limits, rate limits, static mounts.
+    // Falls back to plain HTTP on the default bind addr if the config is absent.
+    app.run().await?;
+    let _: Option<SocketAddr> = None; // SocketAddr import retained for future flag handling.
     Ok(())
 }
 

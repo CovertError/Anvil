@@ -29,3 +29,4 @@ uuid = { workspace = true }
 tracing = { workspace = true }
 indexmap = { workspace = true }
 inventory = { workspace = true }
+parking_lot = { workspace = true }

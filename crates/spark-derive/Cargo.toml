@@ -1,0 +1,22 @@
+[package]
+name = "anvilforge-spark-derive"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Proc macros for Spark: #[derive(Spark)], #[spark::action], #[spark::mount], #[spark::updated], #[spark::on]."
+readme = "../../README.md"
+keywords = ["livewire", "macros", "anvilforge", "spark"]
+categories = ["web-programming", "rust-patterns"]
+
+[lib]
+name = "spark_derive"
+proc-macro = true
+
+[dependencies]
+syn = { workspace = true }
+quote = { workspace = true }
+proc-macro2 = { workspace = true }
+darling = { workspace = true }

@@ -4,7 +4,6 @@
 use std::marker::PhantomData;
 
 use crate::model::Model;
-use crate::pool::Pool;
 use crate::Error;
 
 pub trait RelationKind: Send + Sync + 'static {}
@@ -38,7 +37,7 @@ pub struct Relation<P: Model, C: Model, K: RelationKind> {
 }
 
 impl<P: Model, C: Model> Relation<P, C, HasMany> {
-    pub async fn load(self, pool: &Pool) -> Result<Vec<C>, Error> {
+    pub async fn load(self, pool: &sqlx::PgPool) -> Result<Vec<C>, Error> {
         let sql = format!(
             "SELECT {} FROM {} WHERE {} = $1",
             C::COLUMNS.join(", "),
@@ -54,7 +53,7 @@ impl<P: Model, C: Model> Relation<P, C, HasMany> {
 }
 
 impl<P: Model, C: Model> Relation<P, C, BelongsTo> {
-    pub async fn load(self, pool: &Pool) -> Result<Option<C>, Error> {
+    pub async fn load(self, pool: &sqlx::PgPool) -> Result<Option<C>, Error> {
         let sql = format!(
             "SELECT {} FROM {} WHERE {} = $1 LIMIT 1",
             C::COLUMNS.join(", "),
@@ -70,7 +69,7 @@ impl<P: Model, C: Model> Relation<P, C, BelongsTo> {
 }
 
 impl<P: Model, C: Model> Relation<P, C, HasOne> {
-    pub async fn load(self, pool: &Pool) -> Result<Option<C>, Error> {
+    pub async fn load(self, pool: &sqlx::PgPool) -> Result<Option<C>, Error> {
         let sql = format!(
             "SELECT {} FROM {} WHERE {} = $1 LIMIT 1",
             C::COLUMNS.join(", "),

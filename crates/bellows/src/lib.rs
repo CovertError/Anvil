@@ -1,14 +1,19 @@
-//! Reverb — Anvil's websocket server. POC scope: public channels via Axum WS upgrade.
+//! Bellows — Anvilforge's real-time broadcaster.
 //!
-//! Pusher-compatible wire protocol (subscribe → channel_event → publish) so Laravel Echo
-//! can talk to it. Private/presence channels are deferred to v1.1.
+//! WebSocket server with a Pusher-compatible wire protocol (subscribe →
+//! channel_event → publish) so Laravel Echo and existing client SDKs Just Work.
+//! "Bellows" because it breathes life into the forge — pushing events out to
+//! connected browsers in real time.
+//!
+//! POC scope: public channels via Axum's `WebSocketUpgrade`. Private and
+//! presence channels land in v1.1 alongside the Spark auth bridge.
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
-use futures::{SinkExt, StreamExt};
+use futures::StreamExt;
 use indexmap::IndexMap;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -22,15 +27,15 @@ pub struct ChannelBroadcast {
 }
 
 #[derive(Clone, Default)]
-pub struct ReverbServer {
-    inner: Arc<ReverbInner>,
+pub struct BellowsServer {
+    inner: Arc<BellowsInner>,
 }
 
-struct ReverbInner {
+struct BellowsInner {
     channels: RwLock<IndexMap<String, broadcast::Sender<ChannelBroadcast>>>,
 }
 
-impl Default for ReverbInner {
+impl Default for BellowsInner {
     fn default() -> Self {
         Self {
             channels: RwLock::new(IndexMap::new()),
@@ -38,7 +43,7 @@ impl Default for ReverbInner {
     }
 }
 
-impl ReverbServer {
+impl BellowsServer {
     pub fn new() -> Self {
         Self::default()
     }
@@ -76,7 +81,10 @@ enum ClientMessage {
     #[serde(rename = "pusher:subscribe")]
     Subscribe { data: SubscribeData },
     #[serde(rename = "pusher:unsubscribe")]
-    Unsubscribe { data: SubscribeData },
+    Unsubscribe {
+        #[allow(dead_code)]
+        data: SubscribeData,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -91,11 +99,9 @@ struct ServerMessage<'a> {
     data: serde_json::Value,
 }
 
-async fn handle_socket(server: ReverbServer, mut socket: WebSocket) {
+async fn handle_socket(server: BellowsServer, mut socket: WebSocket) {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<ChannelBroadcast>();
 
-    // Spawn forwarder per subscribed channel; for the POC keep things simple
-    // and track subscriptions in a Vec.
     let _ = socket
         .send(Message::Text(
             serde_json::to_string(&ServerMessage {
@@ -170,6 +176,6 @@ pub trait Broadcastable: Send + Sync {
     fn payload(&self) -> serde_json::Value;
 }
 
-pub fn broadcast<B: Broadcastable>(server: &ReverbServer, event: B) {
+pub fn broadcast<B: Broadcastable>(server: &BellowsServer, event: B) {
     server.publish(&event.channel(), &event.event_name(), event.payload());
 }

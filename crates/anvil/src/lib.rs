@@ -21,7 +21,15 @@ pub use anvil_derive::{FormRequest, Job, Migration};
 
 pub use cast;
 pub use forge;
-pub use reverb;
+pub use bellows;
+pub use boost;
+pub use spark;
+pub use spark_derive;
+pub use anvil_test;
+
+/// Pest-flavored testing prelude: `use anvilforge::assay::*;` in your tests
+/// for `expect()` + `TestClient` + rich HTTP assertions.
+pub use anvil_test::assay;
 
 // Convenience: re-export common third-party items so app code can import everything via `anvil::prelude::*`.
 pub mod prelude {
@@ -35,6 +43,13 @@ pub mod prelude {
     pub use crate::view;
 
     pub use anvil_derive::{FormRequest, Job, Migration};
+
+    // Spark — reactive components.
+    pub use spark::prelude::*;
+    pub use spark_derive::{
+        actions as spark_actions, component as spark_component, mount as spark_mount,
+        on as spark_on, updated as spark_updated,
+    };
 
     pub use cast::{Migration as CastMigration, Model};
     pub use cast::{Pool, Schema};

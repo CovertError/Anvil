@@ -19,7 +19,11 @@ anvilforge-core = { workspace = true }
 anvilforge-derive = { workspace = true }
 anvilforge-cast = { workspace = true }
 anvilforge-templates = { workspace = true }
-anvilforge-broadcast = { workspace = true }
+anvilforge-bellows = { workspace = true }
+anvilforge-spark = { workspace = true }
+anvilforge-spark-derive = { workspace = true }
+anvilforge-test = { workspace = true }
+anvilforge-boost = { workspace = true }
 tokio = { workspace = true }
 axum = { workspace = true }
 serde = { workspace = true }

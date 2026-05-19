@@ -1,18 +1,18 @@
 [package]
-name = "anvilforge-broadcast"
+name = "anvilforge-bellows"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Reverb — Anvilforge's websocket server with Pusher-compatible wire protocol."
+description = "Bellows — Anvilforge's real-time broadcaster. WebSocket server with Pusher-compatible wire protocol, breathes events out to connected clients."
 readme = "../../README.md"
-keywords = ["websocket", "broadcast", "pusher", "anvilforge", "reverb"]
+keywords = ["websocket", "broadcast", "real-time", "anvilforge", "bellows"]
 categories = ["web-programming::websocket", "web-programming"]
 
 [lib]
-name = "reverb"
+name = "bellows"
 
 [dependencies]
 tokio = { workspace = true }

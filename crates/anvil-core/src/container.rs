@@ -18,7 +18,10 @@ use crate::mail::MailerHandle;
 use crate::queue::QueueHandle;
 use crate::storage::StorageManager;
 
+/// Backward-compat alias: the default Container pool is still `sqlx::PgPool`.
+/// For multi-driver access, use `c.driver_pool()` (returns `cast_core::Pool` enum).
 pub type Pool = sqlx::PgPool;
+pub use cast_core::ConnectionManager;
 
 #[derive(Clone)]
 pub struct Container {
@@ -31,7 +34,11 @@ pub struct ContainerInner {
     pub session_cfg: SessionConfig,
     pub mail_cfg: MailConfig,
     pub queue_cfg: QueueConfig,
-    pub pool: Pool,
+    pub connections: ConnectionManager,
+    /// Cached PgPool for back-compat `c.pool()`. `None` when the default
+    /// connection is MySQL or SQLite — in that case `c.pool()` panics, and
+    /// users should call `c.driver_pool()` / `c.connection(name)` instead.
+    pub default_pool: Option<Pool>,
     pub cache: CacheStore,
     pub mailer: MailerHandle,
     pub queue: QueueHandle,
@@ -45,8 +52,42 @@ impl Container {
     pub fn app(&self) -> &AppConfig {
         &self.inner.app
     }
+    /// The default connection's write pool. Returns `&sqlx::PgPool` for
+    /// backward compat — panics if the default connection isn't Postgres.
+    /// For multi-driver code, use `driver_pool()` instead.
     pub fn pool(&self) -> &Pool {
-        &self.inner.pool
+        self.inner.default_pool.as_ref().unwrap_or_else(|| {
+            panic!(
+                "c.pool() called but default connection is not Postgres ({:?}). \
+                 Use c.driver_pool() or c.connection(name) instead.",
+                self.driver()
+            )
+        })
+    }
+
+    /// Same as `pool()` but returns `Option<&PgPool>` instead of panicking.
+    pub fn try_pool(&self) -> Option<&Pool> {
+        self.inner.default_pool.as_ref()
+    }
+
+    /// The default connection's pool as the `cast::Pool` enum — Postgres / MySQL / SQLite.
+    /// Multi-driver code should use this and dispatch via `match` or `.as_postgres()`.
+    pub fn driver_pool(&self) -> cast_core::Pool {
+        self.inner.connections.default_pool()
+    }
+
+    /// Which driver the default connection is using.
+    pub fn driver(&self) -> cast_core::Driver {
+        self.inner.connections.default_driver()
+    }
+
+    /// Resolve a named connection. Returns `None` if not configured.
+    pub fn connection(&self, name: &str) -> Option<cast_core::Connection> {
+        self.inner.connections.get(name)
+    }
+    /// The connection manager itself, for advanced cases.
+    pub fn connections(&self) -> &ConnectionManager {
+        &self.inner.connections
     }
     pub fn cache(&self) -> &CacheStore {
         &self.inner.cache
@@ -88,7 +129,7 @@ pub struct ContainerBuilder {
     pub session_cfg: SessionConfig,
     pub mail_cfg: MailConfig,
     pub queue_cfg: QueueConfig,
-    pub pool: Option<Pool>,
+    pub connections: Option<ConnectionManager>,
     pub cache: Option<CacheStore>,
     pub mailer: Option<MailerHandle>,
     pub queue: Option<QueueHandle>,
@@ -105,7 +146,7 @@ impl ContainerBuilder {
             session_cfg: SessionConfig::from_env(),
             mail_cfg: MailConfig::from_env(),
             queue_cfg: QueueConfig::from_env(),
-            pool: None,
+            connections: None,
             cache: None,
             mailer: None,
             queue: None,
@@ -115,10 +156,25 @@ impl ContainerBuilder {
         }
     }
 
+    /// Wrap a single Postgres pool as the default connection. Convenience for
+    /// single-DB apps using Postgres.
     pub fn pool(mut self, pool: Pool) -> Self {
-        self.pool = Some(pool);
+        self.connections = Some(ConnectionManager::from_pool(cast_core::Pool::Postgres(pool)));
         self
     }
+
+    /// Wrap a `cast::Pool` (any driver) as the default connection.
+    pub fn driver_pool(mut self, pool: cast_core::Pool) -> Self {
+        self.connections = Some(ConnectionManager::from_pool(pool));
+        self
+    }
+
+    /// Provide a fully-built `ConnectionManager` (multi-connection apps).
+    pub fn connections(mut self, manager: ConnectionManager) -> Self {
+        self.connections = Some(manager);
+        self
+    }
+
     pub fn cache(mut self, c: CacheStore) -> Self {
         self.cache = Some(c);
         self
@@ -145,7 +201,22 @@ impl ContainerBuilder {
     }
 
     pub fn build(self) -> Container {
-        let pool = self.pool.expect("ContainerBuilder requires a database pool");
+        let connections = self
+            .connections
+            .expect("ContainerBuilder requires a database connection — call .pool(pool) or .connections(manager)");
+        let default_driver_pool = connections.default_pool();
+        let pg_default = default_driver_pool.as_postgres().cloned();
+        let queue = self.queue.unwrap_or_else(|| match &pg_default {
+            Some(pg) => QueueHandle::in_memory(pg.clone()),
+            None => QueueHandle::in_memory_no_pool(),
+        });
+        if pg_default.is_none() {
+            tracing::info!(
+                driver = ?default_driver_pool.driver(),
+                "default connection is non-Postgres — `c.pool()` will panic; use `c.driver_pool()` instead."
+            );
+        }
+        let default_pool = pg_default;
         let inner = ContainerInner {
             app: self.app,
             db: self.db,
@@ -154,11 +225,12 @@ impl ContainerBuilder {
             queue_cfg: self.queue_cfg,
             cache: self.cache.unwrap_or_else(CacheStore::null),
             mailer: self.mailer.unwrap_or_else(MailerHandle::null),
-            queue: self.queue.unwrap_or_else(|| QueueHandle::in_memory(pool.clone())),
+            queue,
             storage: self.storage.unwrap_or_else(StorageManager::local_default),
             events: self.events.unwrap_or_default(),
             auth: self.auth.unwrap_or_default(),
-            pool,
+            default_pool,
+            connections,
             bindings: RwLock::new(HashMap::new()),
         };
         Container {

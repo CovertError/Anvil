@@ -4,14 +4,31 @@ use std::marker::PhantomData;
 
 use sqlx::FromRow;
 
-use crate::pool::Pool;
 use crate::query::QueryBuilder;
 use crate::Error;
+
+/// Inventory record for `#[derive(Model)]`. Lets boost/MCP and other
+/// introspection tools list every model registered at compile time.
+pub struct ModelRegistration {
+    pub class: &'static str,
+    pub table: &'static str,
+    pub columns: &'static [&'static str],
+}
+
+inventory::collect!(ModelRegistration);
+
+pub fn registered_models() -> Vec<&'static ModelRegistration> {
+    inventory::iter::<ModelRegistration>.into_iter().collect()
+}
 
 pub trait Model: Sized + Send + Sync + Unpin + 'static
 where
     for<'r> Self: FromRow<'r, sqlx::postgres::PgRow>,
 {
+    /// When true, the query builder automatically applies a `deleted_at IS NULL`
+    /// filter to `Model::query()`. Set via `#[soft_deletes]` on the struct.
+    const SOFT_DELETES: bool = false;
+
     type PrimaryKey: sqlx::Type<sqlx::Postgres>
         + for<'q> sqlx::Encode<'q, sqlx::Postgres>
         + Send
@@ -36,9 +53,11 @@ where
         QueryBuilder::new()
     }
 
-    /// Fetch by primary key.
+    /// Fetch by primary key. Takes a Postgres pool directly — Cast Models are
+    /// Postgres-only in v0.1. For multi-driver schema + raw sqlx, use the
+    /// `cast::Pool` enum.
     fn find(
-        pool: &Pool,
+        pool: &sqlx::PgPool,
         id: Self::PrimaryKey,
     ) -> futures::future::BoxFuture<'_, Result<Option<Self>, Error>> {
         Box::pin(async move {
@@ -57,7 +76,7 @@ where
     }
 
     /// Fetch all rows.
-    fn all(pool: &Pool) -> futures::future::BoxFuture<'_, Result<Vec<Self>, Error>> {
+    fn all(pool: &sqlx::PgPool) -> futures::future::BoxFuture<'_, Result<Vec<Self>, Error>> {
         Box::pin(async move {
             let sql = format!(
                 "SELECT {} FROM {}",

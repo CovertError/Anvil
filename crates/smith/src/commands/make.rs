@@ -32,6 +32,7 @@ pub fn model(name: &str, with_migration: bool, fields: &[String]) -> Result<()> 
 pub fn migration(name: &str) -> Result<()> {
     let ts = chrono::Utc::now().format("%Y_%m_%d_%H%M%S");
     let file_name = format!("{ts}_{name}.rs");
+    let stem = format!("{ts}_{name}");
     let path = project_root().join("database/migrations").join(&file_name);
 
     // Try to infer "create_X_table" → X
@@ -51,11 +52,41 @@ pub fn migration(name: &str) -> Result<()> {
         MIGRATION_TEMPLATE,
         json!({
             "struct_name": struct_name,
-            "name": name,
+            "name": stem,
             "table": table,
         }),
     )?;
     println!("created {}", path.display());
+
+    // Auto-append the `#[path = "..."] pub mod ...;` line to database/migrations/mod.rs.
+    // Inventory auto-discovers from there. No manual `all()` Vec needed.
+    let mod_rs = project_root().join("database/migrations/mod.rs");
+    let mod_name = snake_case(name);
+    let mod_line = format!(
+        "\n#[path = \"{file_name}\"]\npub mod {mod_name}_{ts_short};\n",
+        ts_short = stem.replace('_', "")
+    );
+    if mod_rs.exists() {
+        let mut current = std::fs::read_to_string(&mod_rs).unwrap_or_default();
+        if !current.contains(&file_name) {
+            if !current.ends_with('\n') {
+                current.push('\n');
+            }
+            current.push_str(&mod_line);
+            std::fs::write(&mod_rs, current).context("append migration to mod.rs")?;
+            println!("appended to database/migrations/mod.rs");
+        }
+    } else {
+        // First migration in a fresh project — create the mod.rs.
+        std::fs::create_dir_all(mod_rs.parent().unwrap()).ok();
+        std::fs::write(
+            &mod_rs,
+            format!(
+                "//! Database migrations. Each file is `mod`-included here. \n//! `MigrationRunner::new(pool)` auto-discovers via inventory.\n{mod_line}"
+            ),
+        )
+        .context("write database/migrations/mod.rs")?;
+    }
     Ok(())
 }
 
@@ -119,6 +150,106 @@ pub fn test(name: &str) -> Result<()> {
     let path = project_root().join(format!("tests/{}.rs", snake_case(name)));
     write_template(&path, TEST_TEMPLATE, json!({ "name": name }))?;
     println!("created {}", path.display());
+    Ok(())
+}
+
+pub fn seeder(name: &str) -> Result<()> {
+    let path = project_root().join(format!("database/seeders/{name}.rs"));
+    write_template(&path, SEEDER_TEMPLATE, json!({ "name": name }))?;
+    println!("created {}", path.display());
+
+    // Auto-append the `#[path] pub mod foo;` line to database/seeders/mod.rs.
+    // Inventory auto-discovers via `#[derive(Seeder)]` — no manual registration.
+    let mod_rs = project_root().join("database/seeders/mod.rs");
+    let mod_name = snake_case(name);
+    let line = format!(
+        "\n#[path = \"{name}.rs\"]\npub mod {mod_name};\npub use {mod_name}::{name};\n"
+    );
+    if mod_rs.exists() {
+        let mut current = std::fs::read_to_string(&mod_rs).unwrap_or_default();
+        if !current.contains(&format!("\"{name}.rs\"")) {
+            if !current.ends_with('\n') {
+                current.push('\n');
+            }
+            current.push_str(&line);
+            std::fs::write(&mod_rs, current).context("append seeder to mod.rs")?;
+            println!("appended to database/seeders/mod.rs");
+        }
+    }
+    println!();
+    println!("  smith db:seed --class={name}");
+    println!();
+    Ok(())
+}
+
+pub fn component(name: &str) -> Result<()> {
+    let snake = snake_case(name);
+    let rust_path = project_root().join(format!("app/Spark/{name}.rs"));
+    let view_path = project_root().join(format!("resources/views/spark/{snake}.forge.html"));
+    write_template(
+        &rust_path,
+        COMPONENT_RUST_TEMPLATE,
+        json!({ "name": name, "snake": snake.clone() }),
+    )?;
+    println!("created {}", rust_path.display());
+    write_template(
+        &view_path,
+        COMPONENT_VIEW_TEMPLATE,
+        json!({ "name": name, "snake": snake.clone() }),
+    )?;
+    println!("created {}", view_path.display());
+
+    // Auto-include `pub mod <snake>;` in app/Spark/mod.rs (create if missing).
+    let mod_rs = project_root().join("app/Spark/mod.rs");
+    let mod_name = snake.clone();
+    let line = format!(
+        "\n#[path = \"{name}.rs\"]\npub mod {mod_name};\npub use {mod_name}::{name};\n"
+    );
+    if mod_rs.exists() {
+        let mut current = std::fs::read_to_string(&mod_rs).unwrap_or_default();
+        if !current.contains(&format!("\"{name}.rs\"")) {
+            if !current.ends_with('\n') {
+                current.push('\n');
+            }
+            current.push_str(&line);
+            std::fs::write(&mod_rs, current).context("append component to mod.rs")?;
+            println!("appended to app/Spark/mod.rs");
+        }
+    } else {
+        std::fs::create_dir_all(mod_rs.parent().unwrap()).ok();
+        std::fs::write(
+            &mod_rs,
+            format!(
+                "//! Spark components. Each module is `mod`-included here.\n//! Components register themselves via `inventory` from `#[spark_component]`.\n{line}"
+            ),
+        )
+        .context("write app/Spark/mod.rs")?;
+    }
+    println!();
+    println!("  Mount it in a template:");
+    println!("    @spark(\"{snake}\")");
+    println!();
+    Ok(())
+}
+
+pub fn factory(name: &str, model: Option<&str>) -> Result<()> {
+    // Infer model from factory name: PostFactory → Post (default).
+    let model_name = model.unwrap_or_else(|| {
+        name.strip_suffix("Factory").unwrap_or(name)
+    });
+    let path = project_root().join(format!("database/factories/{name}.rs"));
+    write_template(
+        &path,
+        FACTORY_TEMPLATE,
+        json!({ "name": name, "model": model_name }),
+    )?;
+    println!("created {}", path.display());
+    println!();
+    println!("  to wire it up:");
+    println!("    1. In database/factories/mod.rs:");
+    println!("         #[path = \"{name}.rs\"] mod {factory_mod};", factory_mod = snake_case(name));
+    println!("         pub use {factory_mod}::{name};", factory_mod = snake_case(name));
+    println!();
     Ok(())
 }
 
@@ -218,11 +349,13 @@ pub struct {{name}} {
 }
 "#;
 
-const MIGRATION_TEMPLATE: &str = r#"use anvilforge::cast::{Migration, Schema};
+const MIGRATION_TEMPLATE: &str = r#"use anvilforge::prelude::*;
+use anvilforge::cast::Schema;
 
+#[derive(Migration)]
 pub struct {{struct_name}};
 
-impl Migration for {{struct_name}} {
+impl CastMigration for {{struct_name}} {
     fn name(&self) -> &'static str {
         "{{name}}"
     }
@@ -239,12 +372,6 @@ impl Migration for {{struct_name}} {
 {{#if table}}        s.drop_if_exists("{{table}}");
 {{else}}        // TODO: define migration down
 {{/if}}    }
-}
-
-::anvilforge::inventory::submit! {
-    ::anvilforge::cast::migration::MigrationRegistration {
-        builder: || Box::new({{struct_name}}),
-    }
 }
 "#;
 
@@ -343,12 +470,112 @@ impl {{name}} {
 }
 "#;
 
-const TEST_TEMPLATE: &str = r#"use anvil_test::TestClient;
+const TEST_TEMPLATE: &str = r#"use anvilforge::assay::*;
 
 #[tokio::test]
 async fn {{name}}_works() {
-    let client = TestClient::new(crate::bootstrap::app::build().await).await;
-    let response = client.get("/").await;
-    response.assert_status(200);
+    let app = crate::bootstrap::app::build(/* container */).await
+        .expect("build app");
+    let client = TestClient::new(app).await;
+
+    client.get("/").await
+        .assert_ok()
+        .assert_see("welcome");
+
+    // Fluent expectations á la Pest:
+    expect(2 + 2).to_be(4);
+    expect(vec!["a", "b", "c"]).to_have_length(3);
+}
+"#;
+
+const SEEDER_TEMPLATE: &str = r#"//! {{name}}. Auto-registered via `#[derive(Seeder)]`.
+
+use anvilforge::prelude::*;
+use anvilforge::seeder::Seeder;
+use anvilforge::async_trait::async_trait;
+
+#[derive(Seeder)]
+pub struct {{name}};
+
+#[async_trait]
+impl Seeder for {{name}} {
+    fn name(&self) -> &'static str { "{{name}}" }
+
+    async fn run(&self, _c: &Container) -> Result<()> {
+        // TODO: write seed data, e.g.:
+        //   sqlx::query("INSERT INTO ... ON CONFLICT DO NOTHING ...")
+        //       .execute(_c.pool()).await.map_err(Error::Database)?;
+        Ok(())
+    }
+}
+"#;
+
+const COMPONENT_RUST_TEMPLATE: &str = r#"//! {{name}} — Spark reactive component.
+
+use anvilforge::prelude::*;
+use spark::prelude::*;
+
+#[spark_component(template = "spark/{{snake}}")]
+pub struct {{name}} {
+    pub count: i32,
+}
+
+#[spark_actions]
+impl {{name}} {
+    #[spark_mount]
+    fn mount(_props: MountProps) -> Self {
+        Self::default()
+    }
+
+    async fn increment(&mut self) -> Result<()> {
+        self.count += 1;
+        Ok(())
+    }
+}
+"#;
+
+const COMPONENT_VIEW_TEMPLATE: &str = r#"<div>
+    <h2>{{ '{{ count }}' }}</h2>
+    <button spark:click="increment">+1</button>
+</div>
+"#;
+
+const FACTORY_TEMPLATE: &str = r#"//! {{name}} — generates random {{model}}s for tests/dev.
+
+use anvilforge::prelude::*;
+use anvilforge::seeder::{Factory, PersistentFactory};
+use anvilforge::async_trait::async_trait;
+
+use crate::app::Models::{{model}};
+
+pub struct {{name}};
+
+impl Factory<{{model}}> for {{name}} {
+    fn definition() -> {{model}} {
+        use fake::{Fake, faker::{name::en::Name, internet::en::SafeEmail}};
+        // TODO: adjust field assignments to match {{model}}'s fields.
+        {{model}} {
+            id: 0,
+            name: Name().fake(),
+            email: SafeEmail().fake(),
+            ..Default::default()
+        }
+    }
+}
+
+// Implement PersistentFactory to enable `{{name}}::create(&c).await?`.
+#[async_trait]
+impl PersistentFactory<{{model}}> for {{name}} {
+    async fn save(_c: &Container, _model: {{model}}) -> Result<{{model}}> {
+        // TODO: insert + return the row with the assigned id.
+        // Example for a User-shaped model:
+        //   let row: (i64,) = sqlx::query_as(
+        //       "INSERT INTO {{model | lower}}s (name, email) VALUES ($1, $2) RETURNING id",
+        //   )
+        //   .bind(&_model.name).bind(&_model.email)
+        //   .fetch_one(_c.pool()).await.map_err(Error::Database)?;
+        //   Ok({{model}} { id: row.0, .._model })
+        Ok(_model)
+    }
 }
 "#;

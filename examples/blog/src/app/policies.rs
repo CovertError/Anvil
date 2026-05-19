@@ -1,7 +1,8 @@
-use anvil_core::auth::Policy;
+use anvilforge::auth::Policy;
 
 use crate::app::models::{Author, Post};
 
+#[allow(dead_code)]
 pub struct PostPolicy;
 
 impl Policy<Author, Post> for PostPolicy {

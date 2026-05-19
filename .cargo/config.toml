@@ -1,0 +1,70 @@
+# Anvilforge workspace cargo aliases + dev-loop performance tuning.
+#
+# This file ships the conservative defaults: aliases that work on every machine,
+# plus commented sections you can uncomment to opt in to faster linkers and
+# Cranelift codegen. `anvil doctor` will tell you which to enable.
+
+[alias]
+a   = "run --release -p anvilforge-cli --quiet --"
+af  = "run --release -p anvilforge-cli --quiet --"
+
+# ────────────────────────────────────────────────────────────────────────────
+# Faster linkers (huge dev-loop win — uncomment after installing the tool)
+# ────────────────────────────────────────────────────────────────────────────
+# Linker time dominates `cargo build` for incremental edits. Switching to
+# `mold` (Linux) or `lld` (macOS) cuts rebuild time by 3-10× on large
+# workspaces like this one.
+#
+# Linux:  `sudo apt install mold`  or  `cargo install --locked mold`
+# macOS:  `brew install llvm`      (provides `lld`)
+# Then uncomment the matching section below.
+
+# [target.x86_64-unknown-linux-gnu]
+# linker = "clang"
+# rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+# [target.aarch64-unknown-linux-gnu]
+# linker = "clang"
+# rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+# macOS Apple Silicon — uncomment if you've installed lld via homebrew.
+# (Xcode 15+ ships a faster default linker; this is mainly for older Xcode.)
+# [target.aarch64-apple-darwin]
+# rustflags = ["-C", "link-arg=-fuse-ld=/opt/homebrew/opt/llvm/bin/ld64.lld"]
+
+# macOS Intel
+# [target.x86_64-apple-darwin]
+# rustflags = ["-C", "link-arg=-fuse-ld=/usr/local/opt/llvm/bin/ld64.lld"]
+
+# Windows
+# [target.x86_64-pc-windows-msvc]
+# linker = "rust-lld.exe"
+
+# ────────────────────────────────────────────────────────────────────────────
+# Cranelift codegen backend (2-3× faster rustc; nightly Rust required)
+# ────────────────────────────────────────────────────────────────────────────
+# Uncomment to use Cranelift in dev builds. Cranelift skips LLVM optimizations
+# — perfect for dev, do NOT use for release.
+#
+# Setup:
+#   rustup toolchain install nightly
+#   rustup component add rustc-codegen-cranelift-preview --toolchain nightly
+#
+# Then use: `cargo +nightly build` or set CARGO_BUILD_RUSTFLAGS.
+
+# [unstable]
+# codegen-backend = true
+#
+# [profile.dev]
+# codegen-backend = "cranelift"
+
+# ────────────────────────────────────────────────────────────────────────────
+# Local environment overrides
+# ────────────────────────────────────────────────────────────────────────────
+# Optional: enable sccache if installed (`cargo install sccache`). Compiler
+# output is cached across all of your Rust projects, so warm rebuilds — even
+# after `cargo clean` — are near-instant.
+#
+# Uncomment and set:
+# [build]
+# rustc-wrapper = "sccache"

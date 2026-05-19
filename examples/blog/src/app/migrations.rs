@@ -1,8 +1,10 @@
-//! Migrations.
+//! Migrations. Each struct derives `Migration`, which registers it with the
+//! framework's inventory — `MigrationRunner::new(pool)` auto-discovers them.
 
 use anvilforge::prelude::*;
 use cast::Schema;
 
+#[derive(Migration)]
 pub struct CreateAuthorsTable;
 impl CastMigration for CreateAuthorsTable {
     fn name(&self) -> &'static str { "2026_01_01_000001_create_authors_table" }
@@ -19,6 +21,7 @@ impl CastMigration for CreateAuthorsTable {
     }
 }
 
+#[derive(Migration)]
 pub struct CreatePostsTable;
 impl CastMigration for CreatePostsTable {
     fn name(&self) -> &'static str { "2026_01_01_000002_create_posts_table" }
@@ -37,6 +40,7 @@ impl CastMigration for CreatePostsTable {
     }
 }
 
+#[derive(Migration)]
 pub struct CreateJobsTable;
 impl CastMigration for CreateJobsTable {
     fn name(&self) -> &'static str { "2026_01_01_000003_create_jobs_table" }
@@ -50,6 +54,8 @@ impl CastMigration for CreateJobsTable {
     }
 }
 
+/// Back-compat: kept for tests + the example blog's old call sites. New apps
+/// should use `MigrationRunner::new(pool)` which auto-discovers via inventory.
 pub fn all() -> Vec<Box<dyn CastMigration>> {
     vec![
         Box::new(CreateAuthorsTable),

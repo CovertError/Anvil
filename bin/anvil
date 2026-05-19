@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# anvil — convenience wrapper. Uses the globally-installed `anvil` binary if
+# one is on PATH (outside this script's own directory). Otherwise falls back to
+# `cargo run --release -p anvilforge-cli --quiet --` from the workspace root.
+#
+# Add this directory to your PATH or symlink the script to use `anvil` from
+# anywhere without running `cargo install` first.
+set -e
+
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+INSTALLED="$(command -v anvil 2>/dev/null || true)"
+if [ -n "$INSTALLED" ] && [ "$INSTALLED" != "$SCRIPT_DIR/anvil" ]; then
+    exec "$INSTALLED" "$@"
+fi
+
+cd "$SCRIPT_DIR/.."
+exec cargo run --release -p anvilforge-cli --quiet -- "$@"

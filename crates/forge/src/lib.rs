@@ -1,11 +1,13 @@
 //! Forge runtime: stack buffer for `@push`/`@stack`, `@vite` asset helper, escape primitives.
 
 pub mod escape;
+pub mod helpers;
 pub mod stack;
 pub mod vite;
 
 pub use askama;
 pub use askama::Template;
+pub use helpers::{class_list, lang, lang_choice, style_list, FormErrors, OldInput};
 
 /// Re-export the common Forge-style template builder.
 pub trait View: askama::Template {

@@ -1,0 +1,16 @@
+[package]
+name = "hot-demo-handlers"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+# `dylib` crate type is what makes this hot-reloadable: the binary will load
+# it via libloading, swap symbols when the file on disk changes, and call the
+# fresh code without restarting. Edit any function below, run `cargo build -p
+# hot-demo-handlers`, and the running server picks up the new code in <100ms.
+[lib]
+crate-type = ["dylib", "rlib"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }

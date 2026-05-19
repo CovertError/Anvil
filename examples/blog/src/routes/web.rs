@@ -8,7 +8,28 @@ pub fn register(r: Router) -> Router {
     r.get("/", root)
         .get("/posts", list_posts)
         .get("/posts/:id", show_post)
+        .get("/spark-demo", spark_demo)
         .get("/health", health)
+}
+
+async fn spark_demo() -> Result<ViewResponse> {
+    // `spark::template::render_source` does the runtime lowering + MiniJinja
+    // render in one shot, with `spark_mount` / `spark_scripts` already
+    // registered on the Environment.
+    let source = r#"<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Spark Counter Demo — Anvilforge</title></head>
+<body>
+<header><h1>Spark Counter Demo</h1></header>
+<main>
+    <p>Click the buttons — watch the count update without a page reload. The
+       JS runtime is loaded by <code>@sparkScripts</code> at the bottom.</p>
+    @spark("counter", { initial: 0, label: "Clicks" })
+</main>
+@sparkScripts
+</body></html>"#;
+    let rendered = spark::template::render_source(source, &serde_json::json!({}))
+        .map_err(|e| Error::Internal(format!("template: {e}")))?;
+    Ok(ViewResponse::new(rendered))
 }
 
 async fn root() -> Result<ViewResponse> {

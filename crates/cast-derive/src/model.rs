@@ -12,6 +12,10 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
 
     let table_name = extract_table_name(input)?;
     let pk_column = extract_pk_column(input).unwrap_or_else(|| "id".to_string());
+    let has_soft_deletes = input
+        .attrs
+        .iter()
+        .any(|a| a.path().is_ident("soft_deletes"));
 
     let fields = match &input.data {
         Data::Struct(s) => match &s.fields {
@@ -88,15 +92,120 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         }
     });
 
+    // ── Write API: emit Eloquent-style INSERT/UPDATE/DELETE methods ──────────
+    //
+    // Fields automatically excluded from INSERT/UPDATE:
+    //   - the primary key (filled in by RETURNING / not present on insert)
+    //   - `created_at` / `updated_at` / `deleted_at` (DB defaults handle them)
+    //
+    // The result: `user.save(&pool).await?` Just Works for the canonical model
+    // shape: id + scalar fields + timestamps.
+    let writable_field_idents: Vec<&syn::Ident> = fields
+        .iter()
+        .filter_map(|f| {
+            let ident = f.ident.as_ref().unwrap();
+            let name = ident.to_string();
+            if name == pk_column
+                || name == "created_at"
+                || name == "updated_at"
+                || name == "deleted_at"
+            {
+                None
+            } else {
+                Some(ident)
+            }
+        })
+        .collect();
+    let writable_field_names: Vec<String> = writable_field_idents
+        .iter()
+        .map(|i| i.to_string())
+        .collect();
+
+    let insert_columns_csv = writable_field_names.join(", ");
+    let insert_placeholders_csv = (1..=writable_field_names.len())
+        .map(|i| format!("${i}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let update_set_csv = writable_field_names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| format!("{name} = ${}", i + 1))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let update_pk_placeholder = writable_field_names.len() + 1;
+
+    let insert_sql = format!(
+        "INSERT INTO {table_name} ({insert_columns_csv}) VALUES ({insert_placeholders_csv}) RETURNING {pk_column}"
+    );
+    let update_sql = format!(
+        "UPDATE {table_name} SET {update_set_csv}, updated_at = CURRENT_TIMESTAMP WHERE {pk_column} = ${update_pk_placeholder}"
+    );
+    let delete_sql = format!("DELETE FROM {table_name} WHERE {pk_column} = $1");
+
+    let insert_sql_lit = syn::LitStr::new(&insert_sql, struct_name.span());
+    let update_sql_lit = syn::LitStr::new(&update_sql, struct_name.span());
+    let delete_sql_lit = syn::LitStr::new(&delete_sql, struct_name.span());
+
+    let bind_inserts = writable_field_idents.iter().map(|i| {
+        quote! { let q = q.bind(&self.#i); }
+    });
+    let bind_updates = writable_field_idents.iter().map(|i| {
+        quote! { let q = q.bind(&self.#i); }
+    });
+
+    let soft_deletes_lit = if has_soft_deletes { quote!(true) } else { quote!(false) };
+
+    // Soft-delete variants of save/delete. `delete()` becomes UPDATE SET deleted_at = NOW().
+    let soft_delete_sql = format!(
+        "UPDATE {table_name} SET deleted_at = CURRENT_TIMESTAMP WHERE {pk_column} = $1"
+    );
+    let force_delete_sql = format!("DELETE FROM {table_name} WHERE {pk_column} = $1");
+    let restore_sql = format!(
+        "UPDATE {table_name} SET deleted_at = NULL WHERE {pk_column} = $1"
+    );
+
+    let soft_delete_sql_lit = syn::LitStr::new(&soft_delete_sql, struct_name.span());
+    let force_delete_sql_lit = syn::LitStr::new(&force_delete_sql, struct_name.span());
+    let restore_sql_lit = syn::LitStr::new(&restore_sql, struct_name.span());
+
+    // Override the default delete SQL when soft deletes are enabled.
+    let delete_method_body = if has_soft_deletes {
+        quote! {
+            ::anvilforge::cast::sqlx::query(#soft_delete_sql_lit)
+                .bind(&self.#pk_field_ident)
+                .execute(pool)
+                .await?;
+            Ok(())
+        }
+    } else {
+        quote! {
+            ::anvilforge::cast::sqlx::query(#delete_sql_lit)
+                .bind(&self.#pk_field_ident)
+                .execute(pool)
+                .await?;
+            Ok(())
+        }
+    };
+
     let output = quote! {
         impl ::anvilforge::cast::Model for #struct_name {
             type PrimaryKey = #pk_field_type;
+            const SOFT_DELETES: bool = #soft_deletes_lit;
             const TABLE: &'static str = #table_lit;
             const PK_COLUMN: &'static str = #pk_lit;
             const COLUMNS: &'static [&'static str] = &[#(#columns_array),*];
 
             fn primary_key(&self) -> &Self::PrimaryKey {
                 &self.#pk_field_ident
+            }
+        }
+
+        // Register this model so `boost` / `anvil mcp` can list it.
+        ::anvilforge::cast::inventory::submit! {
+            ::anvilforge::cast::ModelRegistration {
+                class: ::std::concat!(::std::module_path!(), "::", ::std::stringify!(#struct_name)),
+                table: #table_lit,
+                columns: &[#(#columns_array),*],
             }
         }
 
@@ -110,6 +219,282 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         impl #struct_name {
             pub fn columns() -> #columns_struct_name {
                 #columns_struct_name
+            }
+
+            // ── Eloquent-style write API ─────────────────────────────────────
+
+            /// Insert a new row. Returns `Self` with the primary key populated
+            /// from `RETURNING id`. Mirrors Laravel's `User::create([...])` /
+            /// `User::query()->insert([...])` semantics.
+            ///
+            /// Fields excluded from the INSERT: the primary key, `created_at`,
+            /// `updated_at`, `deleted_at` — these are handled by the database default.
+            pub async fn insert(
+                self,
+                pool: &::anvilforge::cast::sqlx::PgPool,
+            ) -> ::anvilforge::cast::Result<Self> {
+                let q = ::anvilforge::cast::sqlx::query_as::<_, (#pk_field_type,)>(#insert_sql_lit);
+                #(#bind_inserts)*
+                let row = q.fetch_one(pool).await?;
+                Ok(Self { #pk_field_ident: row.0, ..self })
+            }
+
+            /// Update an existing row by primary key. Returns the updated model.
+            /// Sets `updated_at = CURRENT_TIMESTAMP` automatically.
+            ///
+            /// Use when you've mutated fields on `self` and want to persist them:
+            /// ```ignore
+            /// user.name = "Renamed".into();
+            /// let user = user.update(&pool).await?;
+            /// ```
+            pub async fn update(
+                self,
+                pool: &::anvilforge::cast::sqlx::PgPool,
+            ) -> ::anvilforge::cast::Result<Self> {
+                let q = ::anvilforge::cast::sqlx::query(#update_sql_lit);
+                #(#bind_updates)*
+                let q = q.bind(&self.#pk_field_ident);
+                q.execute(pool).await?;
+                Ok(self)
+            }
+
+            /// Save: insert if the primary key is `default()` (e.g. `0` for `i64`),
+            /// otherwise update. Mirrors Eloquent's `$model->save()`.
+            pub async fn save(
+                self,
+                pool: &::anvilforge::cast::sqlx::PgPool,
+            ) -> ::anvilforge::cast::Result<Self>
+            where
+                #pk_field_type: ::core::default::Default + ::core::cmp::PartialEq,
+            {
+                if self.#pk_field_ident == <#pk_field_type as ::core::default::Default>::default() {
+                    self.insert(pool).await
+                } else {
+                    self.update(pool).await
+                }
+            }
+
+            /// Delete by primary key. For models with `#[soft_deletes]`, this is
+            /// a soft delete (UPDATE deleted_at = NOW()). Otherwise it's a hard DELETE.
+            /// Mirrors Eloquent's `$model->delete()`.
+            pub async fn delete(
+                self,
+                pool: &::anvilforge::cast::sqlx::PgPool,
+            ) -> ::anvilforge::cast::Result<()> {
+                #delete_method_body
+            }
+
+            /// Hard delete — bypasses soft-delete tombstoning. Mirrors Eloquent's
+            /// `$model->forceDelete()`.
+            pub async fn force_delete(
+                self,
+                pool: &::anvilforge::cast::sqlx::PgPool,
+            ) -> ::anvilforge::cast::Result<()> {
+                ::anvilforge::cast::sqlx::query(#force_delete_sql_lit)
+                    .bind(&self.#pk_field_ident)
+                    .execute(pool)
+                    .await?;
+                Ok(())
+            }
+
+            /// Restore a soft-deleted model — sets `deleted_at = NULL`. Mirrors
+            /// Eloquent's `$model->restore()`. Only meaningful for models with
+            /// `#[soft_deletes]`.
+            pub async fn restore(
+                self,
+                pool: &::anvilforge::cast::sqlx::PgPool,
+            ) -> ::anvilforge::cast::Result<Self>
+            where
+                <Self as ::anvilforge::cast::Model>::PrimaryKey: ::core::clone::Clone,
+            {
+                ::anvilforge::cast::sqlx::query(#restore_sql_lit)
+                    .bind(&self.#pk_field_ident)
+                    .execute(pool)
+                    .await?;
+                // Return the freshly-loaded row so timestamps reflect reality.
+                use ::anvilforge::cast::Model as _;
+                let pk = ::core::clone::Clone::clone(&self.#pk_field_ident);
+                <Self as ::anvilforge::cast::Model>::find(pool, pk)
+                    .await?
+                    .ok_or(::anvilforge::cast::Error::NotFound)
+            }
+
+            /// Clone the row with the primary key reset to its default value.
+            /// Mirrors Eloquent's `$model->replicate()`.
+            pub fn replicate(&self) -> Self
+            where
+                Self: ::core::clone::Clone,
+                <Self as ::anvilforge::cast::Model>::PrimaryKey: ::core::default::Default,
+            {
+                let mut clone = ::core::clone::Clone::clone(self);
+                clone.#pk_field_ident = <#pk_field_type as ::core::default::Default>::default();
+                clone
+            }
+
+            /// Find a row matching the search predicate, or insert `default` if none exists.
+            /// Mirrors Eloquent's `Model::firstOrCreate([...], [...])`.
+            ///
+            /// ```ignore
+            /// let user = User::first_or_create(
+            ///     pool,
+            ///     |q| q.where_eq(User::columns().email(), "ada@x.com".to_string()),
+            ///     User { id: 0, name: "Ada".into(), email: "ada@x.com".into(), ..Default::default() },
+            /// ).await?;
+            /// ```
+            pub async fn first_or_create<F>(
+                pool: &::anvilforge::cast::sqlx::PgPool,
+                search: F,
+                default: Self,
+            ) -> ::anvilforge::cast::Result<Self>
+            where
+                F: FnOnce(::anvilforge::cast::QueryBuilder<Self>) -> ::anvilforge::cast::QueryBuilder<Self>,
+            {
+                use ::anvilforge::cast::Model as _;
+                let found = search(Self::query()).first(pool).await?;
+                match found {
+                    Some(m) => Ok(m),
+                    None => default.insert(pool).await,
+                }
+            }
+
+            /// Find a row matching the search predicate and update it with `attrs`,
+            /// or insert `attrs` if no match exists. Mirrors Eloquent's `Model::updateOrCreate`.
+            ///
+            /// On match, the existing row's primary key is preserved and the rest of
+            /// the columns are replaced from `attrs`.
+            pub async fn update_or_create<F>(
+                pool: &::anvilforge::cast::sqlx::PgPool,
+                search: F,
+                attrs: Self,
+            ) -> ::anvilforge::cast::Result<Self>
+            where
+                F: FnOnce(::anvilforge::cast::QueryBuilder<Self>) -> ::anvilforge::cast::QueryBuilder<Self>,
+                <Self as ::anvilforge::cast::Model>::PrimaryKey: ::core::clone::Clone,
+            {
+                use ::anvilforge::cast::Model as _;
+                let found = search(Self::query()).first(pool).await?;
+                match found {
+                    Some(existing) => {
+                        let mut merged = attrs;
+                        merged.#pk_field_ident = ::core::clone::Clone::clone(&existing.#pk_field_ident);
+                        merged.update(pool).await
+                    }
+                    None => attrs.insert(pool).await,
+                }
+            }
+
+            /// Eloquent's `Model::find_or_fail`: like `find` but returns
+            /// `Error::NotFound` instead of `Ok(None)`.
+            pub async fn find_or_fail(
+                pool: &::anvilforge::cast::sqlx::PgPool,
+                id: <Self as ::anvilforge::cast::Model>::PrimaryKey,
+            ) -> ::anvilforge::cast::Result<Self> {
+                <Self as ::anvilforge::cast::Model>::find(pool, id)
+                    .await?
+                    .ok_or(::anvilforge::cast::Error::NotFound)
+            }
+
+            /// Eloquent's `Model::findMany([1, 2, 3])`. Returns models whose
+            /// PK is in the supplied list.
+            pub async fn find_many<I>(
+                pool: &::anvilforge::cast::sqlx::PgPool,
+                ids: I,
+            ) -> ::anvilforge::cast::Result<::std::vec::Vec<Self>>
+            where
+                I: ::std::iter::IntoIterator<Item = <Self as ::anvilforge::cast::Model>::PrimaryKey>,
+                <Self as ::anvilforge::cast::Model>::PrimaryKey:
+                    ::core::convert::Into<::anvilforge::cast::sea_query::Value>,
+            {
+                use ::anvilforge::cast::Model as _;
+                let ids: ::std::vec::Vec<_> = ids.into_iter().collect();
+                if ids.is_empty() {
+                    return Ok(::std::vec::Vec::new());
+                }
+                let col = ::anvilforge::cast::Column::<Self, <Self as ::anvilforge::cast::Model>::PrimaryKey>::new(
+                    <Self as ::anvilforge::cast::Model>::PK_COLUMN,
+                );
+                Self::query().where_in(col, ids).get(pool).await
+            }
+
+            /// Eloquent's `Model::destroy([id1, id2, ...])`. Returns the row count.
+            pub async fn destroy<I>(
+                pool: &::anvilforge::cast::sqlx::PgPool,
+                ids: I,
+            ) -> ::anvilforge::cast::Result<u64>
+            where
+                I: ::std::iter::IntoIterator<Item = <Self as ::anvilforge::cast::Model>::PrimaryKey>,
+                <Self as ::anvilforge::cast::Model>::PrimaryKey:
+                    ::core::convert::Into<::anvilforge::cast::sea_query::Value>,
+            {
+                let ids: ::std::vec::Vec<_> = ids.into_iter().collect();
+                if ids.is_empty() {
+                    return Ok(0);
+                }
+                // Build a parameterized `WHERE id IN (...)` using sea-query.
+                let stmt = ::anvilforge::cast::sea_query::Query::delete()
+                    .from_table(::anvilforge::cast::sea_query::Alias::new(
+                        <Self as ::anvilforge::cast::Model>::TABLE,
+                    ))
+                    .and_where(
+                        ::anvilforge::cast::sea_query::Expr::col(
+                            ::anvilforge::cast::sea_query::Alias::new(
+                                <Self as ::anvilforge::cast::Model>::PK_COLUMN,
+                            ),
+                        )
+                        .is_in(ids),
+                    )
+                    .to_owned();
+                use ::anvilforge::cast::sea_query_binder::SqlxBinder as _;
+                let (sql, values) = stmt.build_sqlx(
+                    ::anvilforge::cast::sea_query::PostgresQueryBuilder,
+                );
+                let result = ::anvilforge::cast::sqlx::query_with(&sql, values)
+                    .execute(pool)
+                    .await?;
+                Ok(result.rows_affected())
+            }
+
+            /// Eloquent's `Model::truncate()`. Hard-deletes every row in the table.
+            pub async fn truncate(
+                pool: &::anvilforge::cast::sqlx::PgPool,
+            ) -> ::anvilforge::cast::Result<()> {
+                let sql = format!(
+                    "TRUNCATE TABLE {} RESTART IDENTITY CASCADE",
+                    <Self as ::anvilforge::cast::Model>::TABLE,
+                );
+                ::anvilforge::cast::sqlx::query(&sql).execute(pool).await?;
+                Ok(())
+            }
+
+            /// Reload `self` from the database in place. Mirrors Eloquent's
+            /// `$model->refresh()`. Returns `Error::NotFound` if the row has been deleted.
+            pub async fn refresh(
+                &mut self,
+                pool: &::anvilforge::cast::sqlx::PgPool,
+            ) -> ::anvilforge::cast::Result<()>
+            where
+                <Self as ::anvilforge::cast::Model>::PrimaryKey: ::core::clone::Clone,
+            {
+                use ::anvilforge::cast::Model as _;
+                let pk = ::core::clone::Clone::clone(self.primary_key());
+                *self = <Self as ::anvilforge::cast::Model>::find(pool, pk)
+                    .await?
+                    .ok_or(::anvilforge::cast::Error::NotFound)?;
+                Ok(())
+            }
+
+            /// Like `refresh` but returns a fresh copy without mutating `self`.
+            /// Mirrors Eloquent's `$model->fresh()`.
+            pub async fn fresh(
+                &self,
+                pool: &::anvilforge::cast::sqlx::PgPool,
+            ) -> ::anvilforge::cast::Result<::core::option::Option<Self>>
+            where
+                <Self as ::anvilforge::cast::Model>::PrimaryKey: ::core::clone::Clone,
+            {
+                use ::anvilforge::cast::Model as _;
+                let pk = ::core::clone::Clone::clone(self.primary_key());
+                <Self as ::anvilforge::cast::Model>::find(pool, pk).await
             }
 
             #(#relation_methods)*
@@ -212,14 +597,14 @@ fn expand_relation(
             // For has_many / has_one: parent's PK value is the local value;
             // we filter the child table by `foreign_key = self.pk_field`.
             let load_method = if rel.kind == "HasMany" {
-                quote! { pub async fn #method(&self, pool: &::anvilforge::cast::Pool) -> ::anvilforge::cast::Result<Vec<#child>> {
+                quote! { pub async fn #method(&self, pool: &::anvilforge::cast::sqlx::PgPool) -> ::anvilforge::cast::Result<Vec<#child>> {
                     use ::anvilforge::cast::Model as _;
                     #child::query()
                         .where_eq(#child::columns().#foreign_key_field(), self.#pk_field.clone())
                         .get(pool).await
                 }}
             } else {
-                quote! { pub async fn #method(&self, pool: &::anvilforge::cast::Pool) -> ::anvilforge::cast::Result<Option<#child>> {
+                quote! { pub async fn #method(&self, pool: &::anvilforge::cast::sqlx::PgPool) -> ::anvilforge::cast::Result<Option<#child>> {
                     use ::anvilforge::cast::Model as _;
                     #child::query()
                         .where_eq(#child::columns().#foreign_key_field(), self.#pk_field.clone())
@@ -243,7 +628,7 @@ fn expand_relation(
                     #rel_type_name
                 }
 
-                pub async fn #method(&self, pool: &::anvilforge::cast::Pool) -> ::anvilforge::cast::Result<Option<#child>> {
+                pub async fn #method(&self, pool: &::anvilforge::cast::sqlx::PgPool) -> ::anvilforge::cast::Result<Option<#child>> {
                     use ::anvilforge::cast::Model as _;
                     #child::find(pool, self.#foreign_key_field.clone()).await
                 }

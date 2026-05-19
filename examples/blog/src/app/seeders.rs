@@ -1,7 +1,5 @@
 use anvilforge::prelude::*;
 
-use crate::app::models::Author;
-
 pub async fn run_all(container: &Container) -> anyhow::Result<()> {
     let pool = container.pool();
     let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM authors")

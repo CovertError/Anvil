@@ -21,4 +21,5 @@ pub mod compiler;
 pub mod lower;
 pub mod parser;
 
-pub use compiler::{compile_dir, compile_file, compile_source};
+pub use compiler::{compile_dir, compile_file, compile_source, compile_source_runtime};
+pub use lower::LowerTarget;

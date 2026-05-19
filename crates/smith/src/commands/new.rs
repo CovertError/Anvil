@@ -1,6 +1,10 @@
-//! `smith new <name>` — scaffold a complete, runnable Anvil project.
+//! `smith new <name>` — scaffold a complete, runnable Anvilforge project that
+//! mirrors Laravel's directory layout.
 //!
-//! Mirrors `laravel new <name>` / `composer create-project laravel/laravel <name>`.
+//! Top-level dirs (`app/`, `bootstrap/`, `config/`, `database/`, `routes/`,
+//! `resources/`, `storage/`, `tests/`, `lang/`, `public/`) live at the project
+//! root, exactly as Laravel does it. The Rust source tree is just a thin
+//! `src/main.rs` + `src/lib.rs` shim that points at those dirs via `#[path]`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -25,16 +29,18 @@ pub fn run(target: &str) -> Result<()> {
 
     create_directories(&root)?;
     write_root_files(&root, &pkg_name)?;
-    write_source_files(&root, &pkg_name)?;
-    write_app_files(&root)?;
-    write_bootstrap_files(&root)?;
-    write_routes_files(&root)?;
-    write_config_files(&root)?;
-    write_database_files(&root)?;
-    write_resources_files(&root, &pkg_name)?;
-    write_frontend_files(&root, &pkg_name)?;
-    write_storage_files(&root)?;
-    write_test_files(&root)?;
+    write_src_shim(&root, &pkg_name)?;
+    write_app(&root)?;
+    write_bootstrap(&root)?;
+    write_config(&root)?;
+    write_database(&root)?;
+    write_routes(&root)?;
+    write_lang(&root)?;
+    write_resources(&root, &pkg_name)?;
+    write_frontend(&root)?;
+    write_public(&root, &pkg_name)?;
+    write_storage(&root)?;
+    write_tests(&root)?;
 
     println!();
     println!("  ✓ scaffolded {} ({})", root.display(), pkg_name);
@@ -46,60 +52,49 @@ pub fn run(target: &str) -> Result<()> {
     println!("    smith migrate");
     println!("    smith serve");
     println!();
-    println!("  then open http://localhost:8080");
+    println!("  layout: top-level app/, bootstrap/, config/, etc. — Laravel-style.");
+    println!("  Rust source: src/main.rs + src/lib.rs shim; everything else lives outside src/.");
     println!();
     Ok(())
-}
-
-fn sanitize_pkg_name(raw: &str) -> String {
-    // Cargo package names: lowercase, alphanumeric + dash/underscore.
-    let lower = raw.to_ascii_lowercase();
-    let mut out = String::new();
-    for c in lower.chars() {
-        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-            out.push(c);
-        } else {
-            out.push('-');
-        }
-    }
-    // Strip leading/trailing dashes.
-    out.trim_matches('-').to_string()
 }
 
 fn create_directories(root: &Path) -> Result<()> {
     let dirs = [
         "src",
-        "src/app",
-        "src/bootstrap",
-        "src/routes",
-        "src/config",
-        "src/database",
-        "app/Models",
+        "app/Console",
+        "app/Events",
+        "app/Exceptions",
         "app/Http/Controllers",
+        "app/Http/Middleware",
         "app/Http/Requests",
         "app/Jobs",
+        "app/Listeners",
         "app/Mail",
+        "app/Models",
         "app/Notifications",
         "app/Policies",
         "app/Providers",
-        "app/Exceptions",
+        "app/Rules",
         "bootstrap",
         "config",
-        "database/migrations",
         "database/factories",
+        "database/migrations",
         "database/seeders",
-        "resources/views/layouts",
-        "resources/views/components",
-        "resources/views/pages",
+        "lang/en",
+        "public/build",
         "resources/css",
         "resources/js",
+        "resources/views/components",
+        "resources/views/layouts",
+        "resources/views/pages",
         "routes",
-        "tests",
         "storage/app",
-        "storage/logs",
         "storage/framework/cache",
         "storage/framework/sessions",
-        "public/build",
+        "storage/framework/views",
+        "storage/logs",
+        "tests/Feature",
+        "tests/Unit",
     ];
     for d in dirs {
         fs::create_dir_all(root.join(d)).context("create dir")?;
@@ -107,10 +102,12 @@ fn create_directories(root: &Path) -> Result<()> {
     Ok(())
 }
 
+// ─── root-level files ───────────────────────────────────────────────────────
+
 fn write_root_files(root: &Path, name: &str) -> Result<()> {
-    // The facade re-exports everything users need; one direct dep is enough.
     let anvilforge_dep = internal_dep_spec("anvil")?;
     let anvilforge_test_dep = internal_dep_spec("anvil-test")?;
+    let forge_codegen_dep = internal_dep_spec("forge-codegen")?;
 
     write(
         root,
@@ -142,6 +139,9 @@ uuid = {{ version = "1", features = ["v4", "serde"] }}
 tracing = "0.1"
 garde = {{ version = "0.20", features = ["full"] }}
 
+[build-dependencies]
+anvilforge-templates-codegen = {forge_codegen_dep}
+
 [dev-dependencies]
 anvilforge-test = {anvilforge_test_dep}
 "#,
@@ -163,6 +163,13 @@ LOG_FORMAT=pretty
 
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/app
 DB_POOL=10
+
+# For multiple connections (Laravel's `config/database.php` map):
+#   DB_CONNECTIONS=default,replica,analytics
+#   DB_DEFAULT=default
+#   DB_REPLICA_URL=postgres://replica.local:5432/app
+#   DB_REPLICA_POOL=5
+#   DB_REPLICA_READ_URLS=postgres://r1/app,postgres://r2/app
 
 SESSION_DRIVER=file
 SESSION_LIFETIME=120
@@ -191,6 +198,7 @@ REDIS_URL=redis://127.0.0.1:6379
 !.env.example
 node_modules/
 public/build/
+!public/build/.gitkeep
 storage/app/*
 !storage/app/.gitkeep
 storage/logs/*
@@ -199,6 +207,8 @@ storage/framework/cache/*
 !storage/framework/cache/.gitkeep
 storage/framework/sessions/*
 !storage/framework/sessions/.gitkeep
+storage/framework/views/*
+!storage/framework/views/.gitkeep
 .DS_Store
 .idea/
 .vscode/
@@ -216,53 +226,19 @@ components = ["rustfmt", "clippy"]
 
     write(
         root,
-        "README.md",
-        &format!(
-            r#"# {name}
+        "build.rs",
+        r#"//! Build script — compiles Forge templates to Askama at build time.
 
-A web app built with [Anvil](https://github.com/anvil-rs/anvil) — Laravel's developer experience, Rust's runtime.
-
-## Quickstart
-
-```bash
-cp .env.example .env
-# edit DATABASE_URL to point at your Postgres
-smith migrate
-smith serve
-```
-
-Then open http://localhost:8080.
-
-## Useful commands
-
-```bash
-smith serve --watch              # dev server with auto-reload
-smith migrate                    # apply pending migrations
-smith migrate:rollback           # undo the last migration batch
-smith migrate:fresh --seed       # drop + remigrate + seed
-smith db:seed                    # run database seeders
-smith make:model Post --with-migration
-smith make:controller PostController --resource
-smith make:migration add_published_at_to_posts
-smith make:request StorePostRequest
-smith make:job SendWelcomeEmail
-smith queue:work                 # start the queue worker
-smith schedule:run               # run scheduled tasks (call from cron)
-smith test                       # run tests
-```
-
-## Project structure
-
-- `src/main.rs` — entry point; dispatches subcommands
-- `src/bootstrap/app.rs` — application builder (middleware, routes, services)
-- `src/routes/{{web,api}}.rs` — route declarations
-- `src/app/` — models, controllers, jobs, policies, providers
-- `src/database/migrations.rs` — schema migrations
-- `src/config/` — typed config modules
-- `resources/views/` — Forge (Blade-style) templates
-- `resources/{{css,js}}/` — frontend assets bundled by Vite
+fn main() {
+    println!("cargo:rerun-if-changed=resources/views");
+    if let Err(e) = forge_codegen::compile_dir(
+        std::path::Path::new("resources/views"),
+        std::path::Path::new("target/forge"),
+    ) {
+        eprintln!("cargo:warning=forge codegen: {e}");
+    }
+}
 "#,
-        ),
     )?;
 
     write(
@@ -307,24 +283,103 @@ export default defineConfig({
         ),
     )?;
 
+    write(
+        root,
+        "README.md",
+        &format!(
+            r#"# {name}
+
+A web app built with [Anvilforge](https://github.com/anvilforge/anvilforge) — Laravel's developer experience, Rust's runtime.
+
+## Quickstart
+
+```bash
+cp .env.example .env
+# edit DATABASE_URL to point at your Postgres
+smith migrate
+smith serve
+```
+
+Open <http://localhost:8080>.
+
+## Directory layout (Laravel-style)
+
+```
+app/        models, controllers, jobs, etc.
+bootstrap/  application builder + service provider registration
+config/     typed config modules
+database/   migrations, factories, seeders
+lang/       translation files
+public/     public assets + Vite build output
+resources/  Forge templates + frontend source
+routes/     web, api, channels, console route definitions
+storage/    local files, logs, framework cache
+tests/      Feature/ and Unit/ test suites
+src/        Rust entry (main.rs + lib.rs glue)
+```
+
+## Useful commands
+
+```bash
+smith serve --watch              # dev server with auto-reload
+smith migrate                    # apply pending migrations
+smith migrate:rollback           # undo the last migration batch
+smith migrate:fresh --seed       # drop + remigrate + seed
+smith db:seed                    # run database seeders
+smith make:model Post --with-migration
+smith make:controller PostController --resource
+smith make:auth                  # scaffold login/register/logout
+smith queue:work                 # start the queue worker
+smith schedule:run               # run scheduled tasks (call from cron)
+smith test                       # run tests
+```
+"#,
+        ),
+    )?;
+
     Ok(())
 }
 
-fn write_source_files(root: &Path, name: &str) -> Result<()> {
+// ─── src/ shim ──────────────────────────────────────────────────────────────
+
+fn write_src_shim(root: &Path, pkg_name: &str) -> Result<()> {
+    let crate_name = pkg_name.replace('-', "_");
+
     write(
         root,
         "src/lib.rs",
-        r#"//! Library surface — exposes app modules to integration tests.
+        r#"//! Library shim — glues Laravel-style top-level directories into the Rust
+//! module tree via `#[path]` attributes.
 
+#![allow(non_snake_case)]
+
+#[path = "../app/mod.rs"]
 pub mod app;
+
+#[path = "../bootstrap/mod.rs"]
 pub mod bootstrap;
+
+#[path = "../config/mod.rs"]
+pub mod config;
+
+#[path = "../database/mod.rs"]
 pub mod database;
+
+#[path = "../lang/mod.rs"]
+pub mod lang;
+
+#[path = "../routes/mod.rs"]
 pub mod routes;
 "#,
     )?;
 
-    let main_rs = format!(
-        r#"//! {name} — entry point.
+    write(
+        root,
+        "src/main.rs",
+        &format!(
+            r#"//! Entry point — dispatches subcommands and calls `bootstrap::app::build`.
+
+#![allow(non_snake_case)]
 
 use std::net::SocketAddr;
 
@@ -333,7 +388,8 @@ use anvilforge::cache::CacheStore;
 use anvilforge::container::ContainerBuilder;
 use anyhow::Result;
 
-use {crate_name}::{{app, bootstrap, database}};
+use {crate_name}::{{bootstrap, database, routes}};
+use {crate_name}::database::seeders::DatabaseSeeder;
 
 #[tokio::main]
 async fn main() -> Result<()> {{
@@ -345,10 +401,15 @@ async fn main() -> Result<()> {{
 
     match subcommand {{
         "serve" => serve().await,
-        "migrate" => run_migrate().await,
-        "migrate:rollback" => run_migrate_rollback().await,
-        "migrate:fresh" => run_migrate_fresh().await,
-        "db:seed" => run_seed().await,
+        "migrate" => run_migrate(&args[2..]).await,
+        "migrate:rollback" => run_migrate_rollback(&args[2..]).await,
+        "migrate:reset" => run_migrate_reset().await,
+        "migrate:refresh" => run_migrate_refresh(&args[2..]).await,
+        "migrate:fresh" => run_migrate_fresh(&args[2..]).await,
+        "migrate:install" => run_migrate_install().await,
+        "migrate:status" => run_migrate_status().await,
+        "db:seed" => run_seed(&args[2..]).await,
+        "db:wipe" => run_db_wipe().await,
         "queue:work" => run_queue_worker().await,
         "schedule:run" => run_schedule().await,
         other => {{
@@ -360,14 +421,32 @@ async fn main() -> Result<()> {{
 
 async fn build_pool() -> Result<sqlx::PgPool> {{
     let cfg = anvilforge::config::DatabaseConfig::from_env();
-    let pool = anvilforge::cast::connect(&cfg.url, cfg.pool_size).await?;
+    let pool = anvilforge::cast::connect(cfg.default_url(), cfg.default_pool_size()).await?;
     Ok(pool)
 }}
 
+async fn build_connections() -> Result<anvilforge::cast::ConnectionManager> {{
+    let cfg = anvilforge::config::DatabaseConfig::from_env();
+    use std::collections::HashMap;
+    let mut conns: HashMap<String, anvilforge::cast::Connection> = HashMap::new();
+    for (name, conn_cfg) in &cfg.connections {{
+        if conn_cfg.url.is_empty() {{ continue; }}
+        let write = anvilforge::cast::connect(&conn_cfg.url, conn_cfg.pool_size).await?;
+        let mut reads = Vec::new();
+        for ru in &conn_cfg.read_urls {{
+            reads.push(anvilforge::cast::connect(ru, conn_cfg.pool_size).await?);
+        }}
+        conns.insert(name.clone(), anvilforge::cast::Connection {{
+            name: name.clone(), write, reads,
+        }});
+    }}
+    Ok(anvilforge::cast::ConnectionManager::from_connections(cfg.default.clone(), conns))
+}}
+
 async fn build_container() -> Result<Container> {{
-    let pool = build_pool().await?;
+    let connections = build_connections().await?;
     let container = ContainerBuilder::from_env()
-        .pool(pool)
+        .connections(connections)
         .cache(CacheStore::moka(1024))
         .build();
     Ok(container)
@@ -384,42 +463,121 @@ async fn serve() -> Result<()> {{
     Ok(())
 }}
 
-async fn run_migrate() -> Result<()> {{
+fn has_flag(args: &[String], name: &str) -> bool {{
+    args.iter().any(|a| a == name)
+}}
+
+async fn run_migrate(args: &[String]) -> Result<()> {{
     let pool = build_pool().await?;
-    let runner = anvilforge::cast::MigrationRunner::with_migrations(pool, database::migrations::all());
-    let applied = runner.run_up().await?;
+    let runner = anvilforge::cast::MigrationRunner::new(pool);
+    if has_flag(args, "--pretend") {{
+        for line in runner.pretend().await? {{ println!("{{line}}"); }}
+        return Ok(());
+    }}
+    let applied = if has_flag(args, "--step") {{
+        runner.run_up_step().await?
+    }} else {{
+        runner.run_up().await?
+    }};
     if applied.is_empty() {{
         println!("nothing to migrate");
     }} else {{
-        for name in applied {{
-            println!("migrated: {{name}}");
-        }}
+        for name in applied {{ println!("migrated: {{name}}"); }}
+    }}
+    if has_flag(args, "--seed") {{ run_seed().await?; }}
+    Ok(())
+}}
+
+async fn run_migrate_rollback(args: &[String]) -> Result<()> {{
+    let pool = build_pool().await?;
+    let runner = anvilforge::cast::MigrationRunner::new(pool);
+    let steps: u32 = args.iter().position(|a| a == "--steps")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
+    let mut all_rolled: Vec<String> = Vec::new();
+    for _ in 0..steps {{
+        let rolled = runner.rollback().await?;
+        if rolled.is_empty() {{ break; }}
+        all_rolled.extend(rolled);
+    }}
+    if all_rolled.is_empty() {{
+        println!("nothing to roll back");
+    }} else {{
+        for name in all_rolled {{ println!("rolled back: {{name}}"); }}
     }}
     Ok(())
 }}
 
-async fn run_migrate_rollback() -> Result<()> {{
+async fn run_migrate_reset() -> Result<()> {{
     let pool = build_pool().await?;
-    let runner = anvilforge::cast::MigrationRunner::with_migrations(pool, database::migrations::all());
-    let rolled = runner.rollback().await?;
-    for name in rolled {{
-        println!("rolled back: {{name}}");
-    }}
+    let runner = anvilforge::cast::MigrationRunner::new(pool);
+    let rolled = runner.reset().await?;
+    for name in rolled {{ println!("rolled back: {{name}}"); }}
     Ok(())
 }}
 
-async fn run_migrate_fresh() -> Result<()> {{
+async fn run_migrate_refresh(args: &[String]) -> Result<()> {{
     let pool = build_pool().await?;
-    let runner = anvilforge::cast::MigrationRunner::with_migrations(pool, database::migrations::all());
+    let runner = anvilforge::cast::MigrationRunner::new(pool);
+    let applied = runner.refresh().await?;
+    for name in applied {{ println!("migrated: {{name}}"); }}
+    if has_flag(args, "--seed") {{ run_seed().await?; }}
+    Ok(())
+}}
+
+async fn run_migrate_fresh(args: &[String]) -> Result<()> {{
+    let pool = build_pool().await?;
+    let runner = anvilforge::cast::MigrationRunner::new(pool);
     runner.fresh().await?;
     println!("fresh migrations complete");
+    if has_flag(args, "--seed") {{ run_seed().await?; }}
     Ok(())
 }}
 
-async fn run_seed() -> Result<()> {{
+async fn run_migrate_install() -> Result<()> {{
+    let pool = build_pool().await?;
+    let runner = anvilforge::cast::MigrationRunner::new(pool);
+    runner.install().await?;
+    println!("migrations table ready");
+    Ok(())
+}}
+
+async fn run_migrate_status() -> Result<()> {{
+    let pool = build_pool().await?;
+    let runner = anvilforge::cast::MigrationRunner::new(pool);
+    let status = runner.status().await?;
+    println!("{{:<60}}  {{:<8}}  {{}}", "Migration", "Status", "Batch");
+    println!("{{:-<60}}  {{:-<8}}  {{:-<5}}", "", "", "");
+    for s in &status {{
+        let state = if s.applied {{ "applied" }} else {{ "pending" }};
+        let batch = s.batch.map(|b| b.to_string()).unwrap_or_else(|| "-".into());
+        println!("{{:<60}}  {{:<8}}  {{}}", s.name, state, batch);
+    }}
+    if status.is_empty() {{ println!("(no migrations registered)"); }}
+    Ok(())
+}}
+
+async fn run_db_wipe() -> Result<()> {{
+    let pool = build_pool().await?;
+    sqlx::query("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+        .execute(&pool)
+        .await?;
+    println!("database wiped");
+    Ok(())
+}}
+
+async fn run_seed(args: &[String]) -> Result<()> {{
     let container = build_container().await?;
-    app::seeders::run_all(&container).await?;
-    println!("seeders complete");
+    let class = args.iter().position(|a| a == "--class")
+        .and_then(|i| args.get(i + 1).cloned());
+    if let Some(class) = class {{
+        DatabaseSeeder::run_named(&container, &class).await?;
+        println!("seeded: {{class}}");
+    }} else {{
+        DatabaseSeeder::run_root(&container).await?;
+        println!("seeders complete");
+    }}
     Ok(())
 }}
 
@@ -432,35 +590,188 @@ async fn run_queue_worker() -> Result<()> {{
 
 async fn run_schedule() -> Result<()> {{
     let container = build_container().await?;
-    let schedule = app::schedule::build();
+    let schedule = routes::console::schedule();
     schedule.run_due(&container).await?;
     Ok(())
 }}
 "#,
-        name = name,
-        crate_name = name.replace('-', "_"),
-    );
-    write(root, "src/main.rs", &main_rs)?;
+        ),
+    )?;
 
     Ok(())
 }
 
-fn write_app_files(root: &Path) -> Result<()> {
+// ─── app/ ───────────────────────────────────────────────────────────────────
+
+fn write_app(root: &Path) -> Result<()> {
     write(
         root,
-        "src/app/mod.rs",
-        r#"pub mod models;
-pub mod policies;
-pub mod requests;
-pub mod schedule;
-pub mod seeders;
+        "app/mod.rs",
+        r#"//! Application code. Mirrors Laravel's `app/` directory.
+
+pub mod Console;
+pub mod Events;
+pub mod Exceptions;
+pub mod Http;
+pub mod Jobs;
+pub mod Listeners;
+pub mod Mail;
+pub mod Models;
+pub mod Notifications;
+pub mod Policies;
+pub mod Providers;
+pub mod Rules;
 "#,
     )?;
 
     write(
         root,
-        "src/app/models.rs",
-        r#"//! Cast models. Add new models here (or run `smith make:model Foo`).
+        "app/Console/mod.rs",
+        r#"#[path = "Kernel.rs"]
+mod kernel;
+pub use kernel::Kernel;
+"#,
+    )?;
+    write(
+        root,
+        "app/Console/Kernel.rs",
+        r#"//! App-level CLI commands. `src/main.rs` handles framework subcommand
+//! dispatch; extend here to register custom commands.
+
+pub struct Kernel;
+
+impl Kernel {
+    pub fn commands() -> Vec<&'static str> { Vec::new() }
+}
+"#,
+    )?;
+
+    write(
+        root,
+        "app/Events/mod.rs",
+        r#"//! Events your app dispatches. Plain structs that `Serialize + Deserialize`.
+"#,
+    )?;
+
+    write(
+        root,
+        "app/Exceptions/mod.rs",
+        r#"#[path = "Handler.rs"]
+mod handler;
+pub use handler::Handler;
+"#,
+    )?;
+    write(
+        root,
+        "app/Exceptions/Handler.rs",
+        r#"//! Custom exception handling — override how errors render per status code.
+
+use anvilforge::prelude::*;
+
+pub struct Handler;
+
+impl Handler {
+    /// Hook called by the framework on each error. Return `Some(response)` to
+    /// override the default rendering, or `None` to use Anvilforge's built-in
+    /// `IntoResponse` impl on `Error`.
+    pub fn render(_error: &Error) -> Option<anvilforge::axum::response::Response> {
+        None
+    }
+}
+"#,
+    )?;
+
+    write(
+        root,
+        "app/Http/mod.rs",
+        r#"pub mod Controllers;
+pub mod Middleware;
+pub mod Requests;
+"#,
+    )?;
+    write(
+        root,
+        "app/Http/Controllers/mod.rs",
+        r#"#[path = "HomeController.rs"]
+mod home_controller;
+pub use home_controller::HomeController;
+"#,
+    )?;
+    write(
+        root,
+        "app/Http/Controllers/HomeController.rs",
+        r##"//! Home controller — example of a basic controller.
+
+use anvilforge::prelude::*;
+
+pub struct HomeController;
+
+impl HomeController {
+    pub async fn index() -> Result<ViewResponse> {
+        Ok(ViewResponse::new(
+            r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Anvilforge</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 640px; margin: 4rem auto; padding: 0 1rem; line-height: 1.6; color: #333; }
+        h1 { color: #c2410c; }
+        code { background: #f5f5f4; padding: 2px 6px; border-radius: 4px; font-size: 0.95em; }
+    </style>
+</head>
+<body>
+    <h1>Forged in Rust</h1>
+    <p>Your Anvilforge app is up. Edit <code>app/Http/Controllers/HomeController.rs</code> or <code>routes/web.rs</code> to customize.</p>
+</body>
+</html>"#.to_string(),
+        ))
+    }
+
+    pub async fn health() -> &'static str {
+        "ok"
+    }
+}
+"##,
+    )?;
+    write(
+        root,
+        "app/Http/Middleware/mod.rs",
+        r#"//! Custom HTTP middleware. Register names in `bootstrap/app.rs` and reference
+//! by name from route declarations: `.middleware(["my_mw"])`.
+"#,
+    )?;
+    write(
+        root,
+        "app/Http/Requests/mod.rs",
+        r#"//! Form request structs — `#[derive(FormRequest)]` makes them Axum extractors
+//! that parse + validate the request body and return a typed struct.
+"#,
+    )?;
+
+    for (path, body) in [
+        ("app/Jobs/mod.rs",          "//! Background jobs — `#[derive(Job)]` makes them dispatchable.\n"),
+        ("app/Listeners/mod.rs",     "//! Event listeners — register in `app/Providers/EventServiceProvider.rs`.\n"),
+        ("app/Mail/mod.rs",          "//! Mailables — types that implement `anvilforge::mail::Mailable`.\n"),
+        ("app/Notifications/mod.rs", "//! Notifications — types that implement `anvilforge::notification::Notification`.\n"),
+        ("app/Policies/mod.rs",      "//! Authorization policies — implement `Policy<User, Subject>` per model.\n"),
+        ("app/Rules/mod.rs",         "//! Custom validation rules — composable garde validators.\n"),
+    ] {
+        write(root, path, body)?;
+    }
+
+    write(
+        root,
+        "app/Models/mod.rs",
+        r#"#[path = "User.rs"]
+mod user;
+pub use user::User;
+"#,
+    )?;
+    write(
+        root,
+        "app/Models/User.rs",
+        r#"//! The default User model.
 
 use anvilforge::prelude::*;
 
@@ -479,77 +790,69 @@ pub struct User {
 
     write(
         root,
-        "src/app/policies.rs",
-        r#"//! Authorization policies. Implement `Policy<User, Subject>` per model.
+        "app/Providers/mod.rs",
+        r#"#[path = "AppServiceProvider.rs"]
+mod app_service_provider;
+#[path = "AuthServiceProvider.rs"]
+mod auth_service_provider;
+#[path = "RouteServiceProvider.rs"]
+mod route_service_provider;
 
-// Example:
-//
-//   use anvilforge::auth::Policy;
-//   use crate::app::models::User;
-//
-//   pub struct UserPolicy;
-//   impl Policy<User, User> for UserPolicy {
-//       fn check(viewer: &User, ability: &str, target: &User) -> bool {
-//           match ability {
-//               "view" => true,
-//               "update" | "delete" => viewer.id == target.id,
-//               _ => false,
-//           }
-//       }
-//   }
+pub use app_service_provider::AppServiceProvider;
+pub use auth_service_provider::AuthServiceProvider;
+pub use route_service_provider::RouteServiceProvider;
 "#,
     )?;
-
     write(
         root,
-        "src/app/requests.rs",
-        r#"//! Form request structs — derive `FormRequest`, fields use garde `#[garde(...)]`.
-
-// Example:
-//
-//   use anvilforge::prelude::*;
-//   use garde::Validate;
-//
-//   #[derive(Debug, Deserialize, Validate, FormRequest)]
-//   pub struct CreateUserRequest {
-//       #[garde(length(min = 1, max = 80))]
-//       pub name: String,
-//
-//       #[garde(email)]
-//       pub email: String,
-//
-//       #[garde(length(min = 8))]
-//       pub password: String,
-//   }
-"#,
-    )?;
-
-    write(
-        root,
-        "src/app/schedule.rs",
-        r#"//! Scheduler entries — called via `smith schedule:run`.
-
-use anvilforge::schedule::Schedule;
-
-pub fn build() -> Schedule {
-    Schedule::new()
-    // Examples:
-    //   schedule.daily_at("02:00", Arc::new(GenerateReports));
-    //   schedule.hourly(Arc::new(PruneOldLogs));
-}
-"#,
-    )?;
-
-    write(
-        root,
-        "src/app/seeders.rs",
-        r#"//! Database seeders — populate development data.
+        "app/Providers/AppServiceProvider.rs",
+        r#"//! Application-level service provider. Register bindings in `register`,
+//! perform side effects (event listeners, etc.) in `boot`.
 
 use anvilforge::prelude::*;
 
-pub async fn run_all(_container: &Container) -> anyhow::Result<()> {
-    tracing::info!("no seeders defined yet");
-    Ok(())
+pub struct AppServiceProvider;
+
+impl AppServiceProvider {
+    pub fn register(_container: &Container) {
+        // Bind custom services here.
+        // e.g., container.bind(MyService::new());
+    }
+
+    pub fn boot(_container: &Container) {
+        // Side effects at app boot.
+    }
+}
+"#,
+    )?;
+    write(
+        root,
+        "app/Providers/AuthServiceProvider.rs",
+        r#"//! Auth-related provider. Register policies here.
+
+use anvilforge::prelude::*;
+
+pub struct AuthServiceProvider;
+
+impl AuthServiceProvider {
+    pub fn boot(_container: &Container) {
+        // Policies are type-based in Anvilforge — just `use` your policy
+        // structs where they're invoked via `authorize::<Policy, _, _>(...)`.
+    }
+}
+"#,
+    )?;
+    write(
+        root,
+        "app/Providers/RouteServiceProvider.rs",
+        r#"//! Route provider — bind route-related concerns here.
+
+pub struct RouteServiceProvider;
+
+impl RouteServiceProvider {
+    pub fn boot() {
+        // URL generators, route model bindings, etc.
+    }
 }
 "#,
     )?;
@@ -557,25 +860,34 @@ pub async fn run_all(_container: &Container) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn write_bootstrap_files(root: &Path) -> Result<()> {
+// ─── bootstrap/ ─────────────────────────────────────────────────────────────
+
+fn write_bootstrap(root: &Path) -> Result<()> {
     write(
         root,
-        "src/bootstrap/mod.rs",
+        "bootstrap/mod.rs",
         r#"pub mod app;
+pub mod providers;
 "#,
     )?;
 
     write(
         root,
-        "src/bootstrap/app.rs",
-        r#"//! Application bootstrap — wires container, middleware, routes.
+        "bootstrap/app.rs",
+        r#"//! The single entry point that wires container, middleware, routes, and
+//! service providers — Laravel 11's `bootstrap/app.php` equivalent.
 
 use anvilforge::prelude::*;
 use anvilforge::Application;
 
+use crate::app::Providers::{AppServiceProvider, AuthServiceProvider, RouteServiceProvider};
 use crate::routes;
 
 pub async fn build(container: Container) -> anyhow::Result<Application> {
+    // Register phase.
+    AppServiceProvider::register(&container);
+
+    // Build the application: middleware registry + routes.
     let pool = container.pool().clone();
     let app = Application::builder()
         .container(|_b| {
@@ -584,120 +896,146 @@ pub async fn build(container: Container) -> anyhow::Result<Application> {
         .web(routes::web::register)
         .api(routes::api::register)
         .build();
+
+    // Boot phase.
+    AppServiceProvider::boot(&container);
+    AuthServiceProvider::boot(&container);
+    RouteServiceProvider::boot();
+
     Ok(app)
 }
 "#,
     )?;
 
-    Ok(())
-}
-
-fn write_routes_files(root: &Path) -> Result<()> {
     write(
         root,
-        "src/routes/mod.rs",
-        r#"pub mod api;
-pub mod web;
-"#,
-    )?;
-
-    write(
-        root,
-        "src/routes/web.rs",
-        r##"//! Web routes — HTML responses.
-
-use anvilforge::prelude::*;
-
-pub fn register(r: Router) -> Router {
-    r.get("/", home).get("/health", health)
-}
-
-async fn home() -> Result<ViewResponse> {
-    Ok(ViewResponse::new(
-        r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Anvil</title>
-    <style>
-        body { font-family: system-ui, sans-serif; max-width: 640px; margin: 4rem auto; padding: 0 1rem; line-height: 1.6; color: #333; }
-        h1 { color: #c2410c; }
-        code { background: #f5f5f4; padding: 2px 6px; border-radius: 4px; font-size: 0.95em; }
-        a { color: #c2410c; }
-    </style>
-</head>
-<body>
-    <h1>Forged in Rust</h1>
-    <p>Your Anvil app is up. Edit <code>src/routes/web.rs</code> to customize this page.</p>
-    <p>Useful commands:</p>
-    <ul>
-        <li><code>smith make:controller HomeController</code></li>
-        <li><code>smith make:model Post --with-migration</code></li>
-        <li><code>smith migrate</code></li>
-    </ul>
-</body>
-</html>"#.to_string(),
-    ))
-}
-
-async fn health() -> &'static str {
-    "ok"
-}
-"##,
-    )?;
-
-    write(
-        root,
-        "src/routes/api.rs",
-        r#"//! API routes — JSON responses.
-
-use anvilforge::prelude::*;
-
-pub fn register(r: Router) -> Router {
-    r.get("/ping", ping)
-}
-
-async fn ping() -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "ok": true }))
-}
+        "bootstrap/providers.rs",
+        r#"//! Service provider list. Add additional providers here as you create them.
 "#,
     )?;
 
     Ok(())
 }
 
-fn write_config_files(root: &Path) -> Result<()> {
+// ─── config/ ────────────────────────────────────────────────────────────────
+
+fn write_config(root: &Path) -> Result<()> {
     write(
         root,
-        "src/config/mod.rs",
-        r#"//! Typed config modules. Each returns a struct loaded from environment.
+        "config/mod.rs",
+        r#"//! Typed config modules — each returns a struct loaded from `.env`.
 //!
-//! Anvil's defaults (in `anvilforge::config`) cover the common cases. Override
-//! per-app config here.
+//! Anvilforge's framework defaults (in `anvilforge::config`) cover the common
+//! cases. Use these per-app modules to override or add custom config.
+
+pub mod app;
+pub mod auth;
+pub mod cache;
+pub mod database;
+pub mod filesystems;
+pub mod mail;
+pub mod queue;
+pub mod session;
 "#,
     )?;
 
+    write(root, "config/app.rs",         "pub use anvilforge::config::AppConfig as Config;\npub fn config() -> Config { Config::from_env() }\n")?;
+    write(root, "config/auth.rs",        "//! Auth config — provider mapping, password reset table, etc.\n")?;
+    write(root, "config/cache.rs",       "pub use anvilforge::config::CacheConfig as Config;\npub fn config() -> Config { Config::from_env() }\n")?;
+    write(root, "config/filesystems.rs", "pub use anvilforge::config::FilesystemConfig as Config;\npub fn config() -> Config { Config::from_env() }\n")?;
+    write(root, "config/mail.rs",        "pub use anvilforge::config::MailConfig as Config;\npub fn config() -> Config { Config::from_env() }\n")?;
+    write(root, "config/queue.rs",       "pub use anvilforge::config::QueueConfig as Config;\npub fn config() -> Config { Config::from_env() }\n")?;
+    write(root, "config/session.rs",     "pub use anvilforge::config::SessionConfig as Config;\npub fn config() -> Config { Config::from_env() }\n")?;
+
+    write(root, "config/database.rs", DATABASE_CONFIG)?;
     Ok(())
 }
 
-fn write_database_files(root: &Path) -> Result<()> {
+const DATABASE_CONFIG: &str = r##"//! Database configuration. Mirrors Laravel's `config/database.php`.
+//!
+//! ## Multiple connections
+//!
+//! Set `DB_CONNECTIONS=default,replica,analytics` in `.env`. Each connection
+//! pulls its URL/pool size from prefixed env vars:
+//!
+//! ```text
+//! DB_CONNECTIONS=default,replica,analytics
+//! DB_DEFAULT=default
+//!
+//! DATABASE_URL=postgres://...                       # the "default" connection
+//! DB_POOL=10
+//!
+//! DB_REPLICA_URL=postgres://replica/...
+//! DB_REPLICA_POOL=5
+//! DB_REPLICA_READ_URLS=postgres://r1/...,postgres://r2/...   # comma-separated
+//!
+//! DB_ANALYTICS_URL=postgres://analytics/...
+//! ```
+//!
+//! ## Switching connections per query
+//!
+//! ```ignore
+//! // Use the default connection (the common case):
+//! let users = User::query().get(c.pool()).await?;
+//!
+//! // Run a query against a specific connection:
+//! let replica = c.connection("replica").expect("replica connection");
+//! let users: Vec<User> = sqlx::query_as("SELECT * FROM users")
+//!     .fetch_all(replica.reader())
+//!     .await?;
+//! ```
+
+pub use anvilforge::config::{ConnectionConfig, ConnectionDriver, DatabaseConfig as Config};
+
+pub fn config() -> Config {
+    Config::from_env()
+}
+"##;
+
+// ─── database/ ──────────────────────────────────────────────────────────────
+
+fn write_database(root: &Path) -> Result<()> {
     write(
         root,
-        "src/database/mod.rs",
-        r#"pub mod migrations;
+        "database/mod.rs",
+        r#"pub mod factories;
+pub mod migrations;
+pub mod seeders;
 "#,
     )?;
 
     write(
         root,
-        "src/database/migrations.rs",
-        r#"//! Migrations. Each migration is a struct implementing `cast::Migration`.
-//!
-//! Run with `smith migrate` / `smith migrate:rollback` / `smith migrate:fresh`.
+        "database/factories/mod.rs",
+        r#"//! Model factories — define `Factory` impls per model for tests.
+"#,
+    )?;
 
-use anvilforge::prelude::*;
+    write(
+        root,
+        "database/migrations/mod.rs",
+        r#"//! Database migrations.
+//!
+//! Each `*.rs` file is `mod`-included here. `smith make:migration` appends the
+//! line for you. Each migration file uses `#[derive(Migration)]`, which
+//! registers it with `inventory` — `MigrationRunner::new(pool)` auto-discovers
+//! every registered migration. No manual `all()` Vec.
+
+#[path = "2026_01_01_000001_create_users_table.rs"]
+pub mod create_users_table;
+
+#[path = "2026_01_01_000002_create_jobs_table.rs"]
+pub mod create_jobs_table;
+"#,
+    )?;
+
+    write(
+        root,
+        "database/migrations/2026_01_01_000001_create_users_table.rs",
+        r#"use anvilforge::prelude::*;
 use anvilforge::cast::Schema;
 
+#[derive(Migration)]
 pub struct CreateUsersTable;
 
 impl CastMigration for CreateUsersTable {
@@ -719,7 +1057,16 @@ impl CastMigration for CreateUsersTable {
         s.drop_if_exists("users");
     }
 }
+"#,
+    )?;
 
+    write(
+        root,
+        "database/migrations/2026_01_01_000002_create_jobs_table.rs",
+        r#"use anvilforge::prelude::*;
+use anvilforge::cast::Schema;
+
+#[derive(Migration)]
 pub struct CreateJobsTable;
 
 impl CastMigration for CreateJobsTable {
@@ -755,9 +1102,67 @@ impl CastMigration for CreateJobsTable {
         s.raw("DROP TABLE IF EXISTS failed_jobs");
     }
 }
+"#,
+    )?;
 
-pub fn all() -> Vec<Box<dyn CastMigration>> {
-    vec![Box::new(CreateUsersTable), Box::new(CreateJobsTable)]
+    write(
+        root,
+        "database/seeders/mod.rs",
+        r#"//! Database seeders. Register each one in `DatabaseSeeder::registry()`.
+
+#[path = "DatabaseSeeder.rs"]
+mod database_seeder;
+pub use database_seeder::DatabaseSeeder;
+"#,
+    )?;
+
+    write(
+        root,
+        "database/seeders/DatabaseSeeder.rs",
+        r#"//! Root seeder. `smith db:seed` calls `DatabaseSeeder::run(&c)`.
+//!
+//! Every seeder with `#[derive(Seeder)]` is auto-registered via inventory.
+//! No manual registry maintenance needed — `smith make:seeder MySeeder` is
+//! enough to make it discoverable by name.
+//!
+//! Inside `run()`, dispatch to sub-seeders via `registry.run(c, "Name")`
+//! — the Rust analog of Laravel's `$this->call([UserSeeder::class, ...])`.
+
+use anvilforge::prelude::*;
+use anvilforge::seeder::{Seeder, SeederRegistry};
+use anvilforge::async_trait::async_trait;
+
+#[derive(Seeder)]
+pub struct DatabaseSeeder;
+
+impl DatabaseSeeder {
+    /// Auto-discovered registry of every `#[derive(Seeder)]` struct in the workspace.
+    pub fn registry() -> SeederRegistry {
+        SeederRegistry::from_inventory()
+    }
+
+    pub async fn run_root(c: &Container) -> Result<()> {
+        let seeder = DatabaseSeeder;
+        seeder.run(c).await
+    }
+
+    pub async fn run_named(c: &Container, class: &str) -> Result<()> {
+        Self::registry().run(c, class).await
+    }
+}
+
+#[async_trait]
+impl Seeder for DatabaseSeeder {
+    fn name(&self) -> &'static str { "DatabaseSeeder" }
+
+    async fn run(&self, _c: &Container) -> Result<()> {
+        // Add `$this->call([...])`-style sub-seeder calls here:
+        //   let registry = Self::registry();
+        //   registry.run(_c, "UserSeeder").await?;
+        //   registry.run(_c, "PostSeeder").await?;
+        tracing::info!("no seeders defined yet");
+        Ok(())
+    }
 }
 "#,
     )?;
@@ -765,7 +1170,108 @@ pub fn all() -> Vec<Box<dyn CastMigration>> {
     Ok(())
 }
 
-fn write_resources_files(root: &Path, name: &str) -> Result<()> {
+// ─── routes/ ────────────────────────────────────────────────────────────────
+
+fn write_routes(root: &Path) -> Result<()> {
+    write(
+        root,
+        "routes/mod.rs",
+        r#"pub mod api;
+pub mod channels;
+pub mod console;
+pub mod web;
+"#,
+    )?;
+
+    write(
+        root,
+        "routes/web.rs",
+        r#"//! Web routes (HTML responses, session + CSRF stack).
+
+use anvilforge::prelude::*;
+
+use crate::app::Http::Controllers::HomeController;
+
+pub fn register(r: Router) -> Router {
+    r.get("/", HomeController::index)
+        .get("/health", HomeController::health)
+}
+"#,
+    )?;
+
+    write(
+        root,
+        "routes/api.rs",
+        r#"//! API routes (JSON responses, bearer-token auth, no CSRF).
+
+use anvilforge::prelude::*;
+
+pub fn register(r: Router) -> Router {
+    r.get("/ping", ping)
+}
+
+async fn ping() -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "ok": true }))
+}
+"#,
+    )?;
+
+    write(
+        root,
+        "routes/channels.rs",
+        r#"//! Broadcasting channel definitions (WebSocket auth, presence membership).
+//! Add channel authorizers here as your app grows.
+"#,
+    )?;
+
+    write(
+        root,
+        "routes/console.rs",
+        r#"//! Scheduled tasks. Called via `smith schedule:run` (typically from system cron).
+
+use anvilforge::schedule::Schedule;
+
+pub fn schedule() -> Schedule {
+    Schedule::new()
+    // Examples:
+    //   schedule.daily_at("02:00", Arc::new(GenerateReports));
+    //   schedule.hourly(Arc::new(PruneOldLogs));
+}
+"#,
+    )?;
+
+    Ok(())
+}
+
+// ─── lang/ ──────────────────────────────────────────────────────────────────
+
+fn write_lang(root: &Path) -> Result<()> {
+    write(
+        root,
+        "lang/mod.rs",
+        r#"//! Translation strings. v0.1 ships a placeholder — real i18n in v0.2.
+
+pub mod en;
+"#,
+    )?;
+    write(
+        root,
+        "lang/en/mod.rs",
+        r#"//! English translations.
+
+pub fn message(key: &str) -> &'static str {
+    match key {
+        _ => "",
+    }
+}
+"#,
+    )?;
+    Ok(())
+}
+
+// ─── resources/ ─────────────────────────────────────────────────────────────
+
+fn write_resources(root: &Path, name: &str) -> Result<()> {
     write(
         root,
         "resources/views/layouts/app.forge.html",
@@ -774,7 +1280,7 @@ fn write_resources_files(root: &Path, name: &str) -> Result<()> {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>{{{{ title }}}} — {name}</title>
+    <title>@yield("title", "{name}")</title>
     @vite(["resources/css/app.css", "resources/js/app.js"])
     @stack("head")
 </head>
@@ -792,12 +1298,11 @@ fn write_resources_files(root: &Path, name: &str) -> Result<()> {
         root,
         "resources/views/pages/welcome.forge.html",
         r#"@extends("layouts.app")
+@section("title", "Welcome")
 @section("content")
     <h2>Welcome</h2>
-    <p>This is a Forge template. Edit it at <code>resources/views/pages/welcome.forge.html</code>.</p>
-    <x-alert type="info">
-        Components compile down to Askama macros.
-    </x-alert>
+    <p>This is a Forge template at <code>resources/views/pages/welcome.forge.html</code>.</p>
+    <x-alert type="info">Components compile down to Askama macros.</x-alert>
 @endsection
 "#,
     )?;
@@ -812,19 +1317,19 @@ fn write_resources_files(root: &Path, name: &str) -> Result<()> {
     Ok(())
 }
 
-fn write_frontend_files(root: &Path, _name: &str) -> Result<()> {
+// ─── frontend (css/js) ──────────────────────────────────────────────────────
+
+fn write_frontend(root: &Path) -> Result<()> {
     write(
         root,
         "resources/css/app.css",
         r#":root {
     --color-primary: #c2410c;
     --color-text: #333;
-    --color-muted: #6b7280;
 }
 body {
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     color: var(--color-text);
-    margin: 0;
     padding: 2rem;
     max-width: 64rem;
     margin: 0 auto;
@@ -834,48 +1339,113 @@ body {
     border-radius: 0.375rem;
     border: 1px solid;
 }
-.alert-info { background: #eff6ff; border-color: #93c5fd; color: #1e40af; }
+.alert-info  { background: #eff6ff; border-color: #93c5fd; color: #1e40af; }
 .alert-error { background: #fef2f2; border-color: #fca5a5; color: #991b1b; }
 "#,
     )?;
-
     write(
         root,
         "resources/js/app.js",
-        r#"// Add your JavaScript here. Vite bundles this and `app.css`.
-console.log("anvil app loaded");
+        r#"// Vite bundles this and `app.css` into `public/build/`.
+console.log("anvilforge app loaded");
 "#,
     )?;
-
     Ok(())
 }
 
-fn write_storage_files(root: &Path) -> Result<()> {
-    for keep in [
+// ─── public/ ────────────────────────────────────────────────────────────────
+
+fn write_public(root: &Path, name: &str) -> Result<()> {
+    write(
+        root,
+        "public/index.html",
+        &format!(
+            r#"<!DOCTYPE html>
+<html>
+<head><title>{name}</title></head>
+<body>Served by Anvilforge.</body>
+</html>
+"#,
+        ),
+    )?;
+    write(root, "public/build/.gitkeep", "")?;
+    Ok(())
+}
+
+// ─── storage/ ───────────────────────────────────────────────────────────────
+
+fn write_storage(root: &Path) -> Result<()> {
+    for k in [
         "storage/app/.gitkeep",
         "storage/logs/.gitkeep",
         "storage/framework/cache/.gitkeep",
         "storage/framework/sessions/.gitkeep",
+        "storage/framework/views/.gitkeep",
     ] {
-        write(root, keep, "")?;
+        write(root, k, "")?;
     }
     Ok(())
 }
 
-fn write_test_files(root: &Path) -> Result<()> {
+// ─── tests/ ─────────────────────────────────────────────────────────────────
+
+fn write_tests(root: &Path) -> Result<()> {
     write(
         root,
-        "tests/smoke.rs",
-        r#"//! Smoke tests.
+        "tests/Feature.rs",
+        r#"//! Feature test binary. Each `#[test]` here runs through the full app stack.
+
+#[path = "Feature/mod.rs"]
+mod features;
+"#,
+    )?;
+    write(
+        root,
+        "tests/Feature/mod.rs",
+        r#"//! Feature tests. Add new test files here and `pub mod`-include them.
 
 #[test]
-fn it_compiles() {
-    // If this test runs, the workspace compiles.
+fn placeholder() {
+    assert!(true);
+}
+"#,
+    )?;
+    write(
+        root,
+        "tests/Unit.rs",
+        r#"//! Unit test binary.
+
+#[path = "Unit/mod.rs"]
+mod units;
+"#,
+    )?;
+    write(
+        root,
+        "tests/Unit/mod.rs",
+        r#"//! Unit tests.
+
+#[test]
+fn placeholder() {
     assert!(true);
 }
 "#,
     )?;
     Ok(())
+}
+
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+fn sanitize_pkg_name(raw: &str) -> String {
+    let lower = raw.to_ascii_lowercase();
+    let mut out = String::new();
+    for c in lower.chars() {
+        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+            out.push(c);
+        } else {
+            out.push('-');
+        }
+    }
+    out.trim_matches('-').to_string()
 }
 
 fn write(root: &Path, rel: &str, content: &str) -> Result<()> {
@@ -887,16 +1457,6 @@ fn write(root: &Path, rel: &str, content: &str) -> Result<()> {
     Ok(())
 }
 
-/// Return the dependency spec for an internal Anvilforge crate.
-///
-/// Resolution order:
-/// 1. `ANVILFORGE_PATH` env var (explicit override)
-/// 2. Walk up from cwd looking for the Anvilforge workspace
-/// 3. The workspace root embedded at build time (works for `cargo install --path crates/smith`)
-/// 4. Fall back to a `version = "..."` crates.io spec
-///
-/// `crate_dir_name` is the workspace directory name (`anvil`, `cast`, `forge`, etc.).
-/// The published crate name is different (`anvilforge`, `anvilforge-cast`, etc.).
 fn internal_dep_spec(crate_dir_name: &str) -> Result<String> {
     let crate_path = format!("crates/{crate_dir_name}");
 
@@ -937,8 +1497,6 @@ fn find_anvilforge_workspace() -> Option<PathBuf> {
 }
 
 fn embedded_workspace_root() -> PathBuf {
-    // CARGO_MANIFEST_DIR at compile time is `<root>/crates/smith`.
-    // The workspace root is two levels up.
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(|p| p.parent())

@@ -24,6 +24,8 @@ http = { workspace = true }
 http-body-util = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_urlencoded = { workspace = true }
+regex = { workspace = true }
 sqlx = { workspace = true }
 fake = { workspace = true }
 parking_lot = { workspace = true }
@@ -31,3 +33,14 @@ async-trait = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 bytes = { workspace = true }
+futures = { workspace = true }
+once_cell = { workspace = true }
+paste = { workspace = true }
+chromiumoxide = { workspace = true, optional = true }
+
+[features]
+default = []
+# Enable `assay::browser` — drives a real headless Chromium for end-to-end
+# browser tests. Requires Chrome/Chromium on the host. Off by default to keep
+# the dev-dep tree light.
+browser = ["chromiumoxide"]

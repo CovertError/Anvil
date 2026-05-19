@@ -1,0 +1,63 @@
+[package]
+name = "anvilforge-spark"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Spark — Livewire-equivalent reactive components baked into Anvilforge. Signed snapshots, partial re-render, real-time push via Bellows."
+readme = "../../README.md"
+keywords = ["livewire", "reactive", "ssr", "anvilforge", "spark"]
+categories = ["web-programming", "web-programming::http-server"]
+
+[lib]
+name = "spark"
+
+[dependencies]
+anvilforge-core = { workspace = true }
+anvilforge-templates = { workspace = true }
+anvilforge-templates-codegen = { workspace = true }
+anvilforge-bellows = { workspace = true }
+anvilforge-spark-derive = { workspace = true }
+
+tokio = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }
+tower = { workspace = true }
+tower-sessions = { workspace = true }
+http = { workspace = true }
+hyper = { workspace = true }
+futures = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+base64 = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+aes-gcm = { workspace = true }
+rand = { workspace = true }
+
+inventory = { workspace = true }
+parking_lot = { workspace = true }
+once_cell = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+minijinja = { workspace = true }
+
+[dev-dependencies]
+futures = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+criterion = { workspace = true }
+tempfile = "3.10"
+
+[[bench]]
+name = "snapshot"
+harness = false
+
+[[bench]]
+name = "template"
+harness = false

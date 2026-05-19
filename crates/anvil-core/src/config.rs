@@ -34,22 +34,166 @@ impl AppConfig {
     }
 }
 
+/// Database configuration. Mirrors Laravel's `config/database.php`:
+///
+/// - A `default` connection name (referenced by models, query builder, migrator).
+/// - A map of named connections — each with its own URL, pool size, optional
+///   read replicas.
+///
+/// The default `from_env()` impl auto-builds a single `default` connection
+/// from `DATABASE_URL` + `DB_POOL`. Apps wanting multiple connections set:
+///
+/// ```text
+/// DB_CONNECTIONS=default,replica,analytics
+/// DATABASE_URL=postgres://...                 # the "default" connection
+/// DB_REPLICA_URL=postgres://replica/...
+/// DB_ANALYTICS_URL=postgres://analytics/...
+/// DB_DEFAULT=default
+/// ```
 #[derive(Debug, Clone)]
 pub struct DatabaseConfig {
+    pub default: String,
+    pub connections: indexmap::IndexMap<String, ConnectionConfig>,
+}
+
+/// A single named connection's config.
+#[derive(Debug, Clone)]
+pub struct ConnectionConfig {
+    pub driver: ConnectionDriver,
+    /// Write URL (or the only URL if read/write splitting is disabled).
     pub url: String,
+    /// Optional comma-separated read replica URLs. If empty, reads use `url`.
+    pub read_urls: Vec<String>,
     pub pool_size: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConnectionDriver {
+    Postgres,
+    /// Reserved for v0.2 (MySQL/SQLite drivers).
+    Other(String),
 }
 
 impl DatabaseConfig {
     pub fn from_env() -> Self {
+        // Allow a comma-separated list of connection names via `DB_CONNECTIONS`.
+        // Each connection `foo` reads `DB_FOO_URL`, `DB_FOO_POOL`, `DB_FOO_DRIVER`,
+        // and `DB_FOO_READ_URLS` (optional). The "default" connection falls back
+        // to the legacy `DATABASE_URL` / `DB_POOL` envs for backward compat.
+        let names = env::var("DB_CONNECTIONS")
+            .map(|s| {
+                s.split(',')
+                    .map(|t| t.trim().to_string())
+                    .filter(|t| !t.is_empty())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|_| vec!["default".to_string()]);
+
+        let default = env::var("DB_DEFAULT").unwrap_or_else(|_| {
+            names.first().cloned().unwrap_or_else(|| "default".to_string())
+        });
+
+        let mut connections = indexmap::IndexMap::new();
+        for name in &names {
+            let cfg = ConnectionConfig::from_env(name);
+            connections.insert(name.clone(), cfg);
+        }
+
+        Self { default, connections }
+    }
+
+    /// Convenience: the URL of the default connection.
+    pub fn default_url(&self) -> &str {
+        self.connections
+            .get(&self.default)
+            .map(|c| c.url.as_str())
+            .unwrap_or("")
+    }
+
+    /// Convenience: the pool size of the default connection.
+    pub fn default_pool_size(&self) -> u32 {
+        self.connections
+            .get(&self.default)
+            .map(|c| c.pool_size)
+            .unwrap_or(10)
+    }
+
+    /// Build a simple single-connection config — useful in tests.
+    pub fn single(url: impl Into<String>, pool_size: u32) -> Self {
+        let mut connections = indexmap::IndexMap::new();
+        connections.insert(
+            "default".to_string(),
+            ConnectionConfig {
+                driver: ConnectionDriver::Postgres,
+                url: url.into(),
+                read_urls: Vec::new(),
+                pool_size,
+            },
+        );
         Self {
-            url: env::var("DATABASE_URL").unwrap_or_else(|_| {
-                "postgres://postgres:postgres@localhost:5432/anvil".to_string()
-            }),
-            pool_size: env::var("DB_POOL")
+            default: "default".to_string(),
+            connections,
+        }
+    }
+}
+
+impl ConnectionConfig {
+    pub fn from_env(name: &str) -> Self {
+        let prefix = if name == "default" {
+            String::new()
+        } else {
+            format!("DB_{}_", name.to_ascii_uppercase())
+        };
+        let url = if name == "default" {
+            env::var("DATABASE_URL")
+                .or_else(|_| env::var(format!("{prefix}URL")))
+                .unwrap_or_else(|_| {
+                    "postgres://postgres:postgres@localhost:5432/anvil".to_string()
+                })
+        } else {
+            env::var(format!("{prefix}URL")).unwrap_or_default()
+        };
+
+        let pool_size = if name == "default" {
+            env::var("DB_POOL")
+                .or_else(|_| env::var(format!("{prefix}POOL")))
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(10),
+                .unwrap_or(10)
+        } else {
+            env::var(format!("{prefix}POOL"))
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(10)
+        };
+
+        let read_urls = env::var(format!("{prefix}READ_URLS"))
+            .map(|s| {
+                s.split(',')
+                    .map(|t| t.trim().to_string())
+                    .filter(|t| !t.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let driver_str = env::var(format!("{prefix}DRIVER")).unwrap_or_else(|_| {
+            // Infer from URL scheme.
+            if url.starts_with("postgres://") || url.starts_with("postgresql://") {
+                "postgres".into()
+            } else {
+                "postgres".into()
+            }
+        });
+        let driver = match driver_str.as_str() {
+            "postgres" | "pgsql" | "pg" => ConnectionDriver::Postgres,
+            other => ConnectionDriver::Other(other.to_string()),
+        };
+
+        Self {
+            driver,
+            url,
+            read_urls,
+            pool_size,
         }
     }
 }

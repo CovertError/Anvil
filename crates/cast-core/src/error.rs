@@ -23,4 +23,7 @@ pub enum Error {
 
     #[error("serialization error: {0}")]
     Serialization(String),
+
+    #[error("{0}")]
+    Internal(String),
 }
