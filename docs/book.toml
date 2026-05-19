@@ -3,15 +3,14 @@ title = "Anvilforge"
 authors = ["Anvilforge contributors"]
 description = "Laravel-equivalent Rust web framework"
 language = "en"
-multilingual = false
 src = "src"
 
 [output.html]
 default-theme = "rust"
 preferred-dark-theme = "ayu"
-git-repository-url = "https://github.com/anvilforge/anvilforge"
-edit-url-template = "https://github.com/anvilforge/anvilforge/edit/main/docs/{path}"
-site-url = "/anvilforge/"
+git-repository-url = "https://github.com/CovertError/Anvil"
+edit-url-template = "https://github.com/CovertError/Anvil/edit/main/docs/{path}"
+site-url = "/Anvil/"
 
 [output.html.fold]
 enable = true
