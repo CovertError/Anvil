@@ -39,3 +39,8 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+        # Don't fail the whole workflow if Pages isn't enabled yet.
+        # Enable at https://github.com/CovertError/Anvil/settings/pages
+        # (source: GitHub Actions). Until then, the build step still runs
+        # and catches mdbook errors.
+        continue-on-error: true

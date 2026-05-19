@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use spark::component::{Ctx, MountProps};
 use spark::registry;
 use spark::snapshot::{self, Memo};
-use spark::Component;
 use spark_derive::{actions, component};
 
 #[component(template = "spark/test_counter")]
