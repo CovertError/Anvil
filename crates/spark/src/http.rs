@@ -100,8 +100,8 @@ pub async fn update(
             if !crate::const_eq(expected.as_bytes(), submitted.as_bytes()) {
                 tracing::debug!("spark /_spark/update: CSRF token mismatch");
                 let mut resp = Response::new(Body::from("CSRF token mismatch"));
-                *resp.status_mut() = StatusCode::from_u16(STATUS_PAGE_EXPIRED)
-                    .unwrap_or(StatusCode::FORBIDDEN);
+                *resp.status_mut() =
+                    StatusCode::from_u16(STATUS_PAGE_EXPIRED).unwrap_or(StatusCode::FORBIDDEN);
                 return Ok(resp);
             }
         }
@@ -116,8 +116,10 @@ pub async fn update(
     // verification accepts any key the server is currently holding so apps
     // can rotate `APP_KEY` without forcing every in-flight client to reload.
     let keyring_owned = crate::render::keyring();
-    let keyring: Vec<(u8, &str)> =
-        keyring_owned.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let keyring: Vec<(u8, &str)> = keyring_owned
+        .iter()
+        .map(|(k, v)| (*k, v.as_str()))
+        .collect();
     let mut out = UpdateResponse {
         components: Vec::with_capacity(req.components.len()),
     };
@@ -139,8 +141,8 @@ pub async fn update(
                 let mut resp = Response::new(Body::from(format!(
                     "snapshot v{client_v} is newer than this server understands (v{server_v}) — refresh the page"
                 )));
-                *resp.status_mut() = StatusCode::from_u16(STATUS_UPGRADE_REQUIRED)
-                    .unwrap_or(StatusCode::CONFLICT);
+                *resp.status_mut() =
+                    StatusCode::from_u16(STATUS_UPGRADE_REQUIRED).unwrap_or(StatusCode::CONFLICT);
                 return Ok(resp);
             }
             Err(e) => return Err(Error::from(e)),

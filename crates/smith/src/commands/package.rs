@@ -229,7 +229,8 @@ fn build_target(
     if !features.is_empty() {
         cmd.arg("--features").arg(features.join(","));
     }
-    println!("  $ {cmd_name} build --release --target {target}{features_str}",
+    println!(
+        "  $ {cmd_name} build --release --target {target}{features_str}",
         features_str = if features.is_empty() {
             String::new()
         } else {
@@ -254,10 +255,7 @@ fn build_target(
     } else {
         project.name.clone()
     };
-    let path = target_root
-        .join(target)
-        .join("release")
-        .join(&bin_name);
+    let path = target_root.join(target).join("release").join(&bin_name);
     if !path.exists() {
         bail!(
             "expected binary at {} but it does not exist",
@@ -387,7 +385,12 @@ any new schema changes.
     Ok(())
 }
 
-fn make_tarball(staged: &Path, dist_dir: &Path, project: &Project, target: &str) -> Result<PathBuf> {
+fn make_tarball(
+    staged: &Path,
+    dist_dir: &Path,
+    project: &Project,
+    target: &str,
+) -> Result<PathBuf> {
     let name = format!("{}-v{}-{}.tar.gz", project.name, project.version, target);
     let path = dist_dir.join(&name);
     let tar_gz = fs::File::create(&path).with_context(|| format!("create {}", path.display()))?;
@@ -416,7 +419,10 @@ fn make_zip(staged: &Path, dist_dir: &Path, project: &Project, target: &str) -> 
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| project.name.clone());
 
-    for entry in walkdir::WalkDir::new(staged).into_iter().filter_map(|e| e.ok()) {
+    for entry in walkdir::WalkDir::new(staged)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
         let p = entry.path();
         if !p.is_file() {
             continue;

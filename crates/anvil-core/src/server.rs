@@ -345,8 +345,7 @@ fn serve_embedded(
                 .body(Body::empty())
                 .expect("304 body");
             if let Some(d) = cache {
-                if let Ok(v) = HeaderValue::from_str(&format!("public, max-age={}", d.as_secs()))
-                {
+                if let Ok(v) = HeaderValue::from_str(&format!("public, max-age={}", d.as_secs())) {
                     resp.headers_mut().insert("cache-control", v);
                 }
             }
@@ -387,7 +386,12 @@ fn quote_etag(raw: &str) -> String {
 fn etag_matches(client: &str, server: &str) -> bool {
     let normalize = |s: &str| -> String {
         s.split(',')
-            .map(|t| t.trim().trim_matches('"').trim_start_matches("W/").to_string())
+            .map(|t| {
+                t.trim()
+                    .trim_matches('"')
+                    .trim_start_matches("W/")
+                    .to_string()
+            })
             .collect::<Vec<_>>()
             .join(",")
     };
@@ -438,9 +442,23 @@ pub async fn serve(
 
     let main_result = if let Some(tls) = &cfg.tls {
         if tls.acme.is_some() {
-            serve_acme(router, addr, tls, cfg.limits.drain_timeout, shutdown_main_rx).await
+            serve_acme(
+                router,
+                addr,
+                tls,
+                cfg.limits.drain_timeout,
+                shutdown_main_rx,
+            )
+            .await
         } else {
-            serve_tls(router, addr, tls, cfg.limits.drain_timeout, shutdown_main_rx).await
+            serve_tls(
+                router,
+                addr,
+                tls,
+                cfg.limits.drain_timeout,
+                shutdown_main_rx,
+            )
+            .await
         }
     } else {
         serve_plain(router, addr, shutdown_main_rx).await
@@ -690,7 +708,10 @@ impl rustls::server::ResolvesServerCert for SniResolver {
         &self,
         client_hello: rustls::server::ClientHello<'_>,
     ) -> Option<Arc<rustls::sign::CertifiedKey>> {
-        let sni = client_hello.server_name().unwrap_or("").to_ascii_lowercase();
+        let sni = client_hello
+            .server_name()
+            .unwrap_or("")
+            .to_ascii_lowercase();
         for (pattern, key) in &self.entries {
             if matches_pattern(&sni, pattern) {
                 return Some(key.clone());
@@ -712,7 +733,10 @@ fn build_sni_resolver(tls: &TlsConfig) -> std::io::Result<SniResolver> {
         additional = tls.additional_certs.len(),
         "tls: SNI resolver active"
     );
-    Ok(SniResolver { entries, default_key })
+    Ok(SniResolver {
+        entries,
+        default_key,
+    })
 }
 
 fn load_certified_key(
@@ -722,11 +746,14 @@ fn load_certified_key(
     use std::io::BufReader;
 
     let cert_file = std::fs::File::open(cert_path).map_err(|e| {
-        std::io::Error::new(e.kind(), format!("opening cert {}: {e}", cert_path.display()))
+        std::io::Error::new(
+            e.kind(),
+            format!("opening cert {}: {e}", cert_path.display()),
+        )
     })?;
     let mut cert_reader = BufReader::new(cert_file);
-    let certs: Vec<rustls::pki_types::CertificateDer<'static>> = rustls_pemfile::certs(&mut cert_reader)
-        .collect::<std::io::Result<_>>()?;
+    let certs: Vec<rustls::pki_types::CertificateDer<'static>> =
+        rustls_pemfile::certs(&mut cert_reader).collect::<std::io::Result<_>>()?;
     if certs.is_empty() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -748,7 +775,10 @@ fn load_certified_key(
     let signing_key = rustls::crypto::ring::sign::any_supported_type(&key)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("sign: {e}")))?;
 
-    Ok(Arc::new(rustls::sign::CertifiedKey::new(certs, signing_key)))
+    Ok(Arc::new(rustls::sign::CertifiedKey::new(
+        certs,
+        signing_key,
+    )))
 }
 
 /// Blocking-thread watcher that re-loads the rustls config whenever the cert
@@ -771,7 +801,7 @@ fn watch_tls_certs(
     let mut watcher = notify::recommended_watcher(move |res| {
         let _ = tx.send(res);
     })
-    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("notify init: {e}")))?;
+    .map_err(|e| std::io::Error::other(format!("notify init: {e}")))?;
 
     // Watch the parent directories — file-level watches don't survive
     // editors that rename-on-write (vim, cargo, etc.), but directory watches
@@ -780,15 +810,12 @@ fn watch_tls_certs(
         if let Some(parent) = p.parent() {
             watcher
                 .watch(parent, RecursiveMode::NonRecursive)
-                .map_err(|e| {
-                    std::io::Error::new(std::io::ErrorKind::Other, format!("notify watch: {e}"))
-                })?;
+                .map_err(|e| std::io::Error::other(format!("notify watch: {e}")))?;
         }
     }
 
     let runtime = tokio::runtime::Handle::try_current().ok();
-    loop {
-        let Ok(event) = rx.recv() else { break };
+    while let Ok(event) = rx.recv() {
         let Ok(event) = event else { continue };
         // Only react to events touching our cert/key files specifically — the
         // directory watcher fires for any sibling file too.
@@ -981,7 +1008,8 @@ fn client_ip(req: &Request<Body>, trusted: &[ipnet::IpNet]) -> String {
         }
     }
 
-    peer.map(|a| a.to_string()).unwrap_or_else(|| "unknown".into())
+    peer.map(|a| a.to_string())
+        .unwrap_or_else(|| "unknown".into())
 }
 
 // ─── Access log ─────────────────────────────────────────────────────────────
@@ -1033,14 +1061,16 @@ async fn request_id_mw(mut req: Request<Body>, next: Next) -> Response<Body> {
     let request_id = inbound.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
 
     if let Ok(v) = HeaderValue::from_str(&request_id) {
-        req.headers_mut().insert(HeaderName::from_static(HEADER), v.clone());
+        req.headers_mut()
+            .insert(HeaderName::from_static(HEADER), v.clone());
         // Run the handler with the id available in the request extensions so
         // downstream code (and the trace layer) can read it without parsing
         // headers again.
         req.extensions_mut().insert(RequestId(request_id.clone()));
 
         let mut resp = next.run(req).await;
-        resp.headers_mut().insert(HeaderName::from_static(HEADER), v);
+        resp.headers_mut()
+            .insert(HeaderName::from_static(HEADER), v);
         resp
     } else {
         next.run(req).await
@@ -1080,10 +1110,7 @@ async fn access_log_mw(
         .and_then(|v| v.to_str().ok())
         .map(String::from);
     let ip = client_ip(&req, &trusted);
-    let request_id = req
-        .extensions()
-        .get::<RequestId>()
-        .map(|id| id.0.clone());
+    let request_id = req.extensions().get::<RequestId>().map(|id| id.0.clone());
 
     let resp = next.run(req).await;
     let elapsed = started.elapsed();

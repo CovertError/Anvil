@@ -7,8 +7,8 @@ pub mod config;
 pub mod container;
 pub mod embedded;
 pub mod error;
-pub mod facade;
 pub mod event;
+pub mod facade;
 pub mod mail;
 pub mod middleware;
 pub mod notification;
@@ -29,9 +29,7 @@ pub mod view;
 
 pub use app::Application;
 pub use container::{Container, ContainerBuilder, FromContainer};
-pub use embedded::{
-    register as register_embedded_assets, EmbeddedAsset, EmbeddedAssetFetcher,
-};
+pub use embedded::{register as register_embedded_assets, EmbeddedAsset, EmbeddedAssetFetcher};
 pub use error::{Error, Result};
 pub use middleware::{MiddlewareRegistry, NamedMiddleware};
 pub use response::{Redirect, Responder, ViewResponse};

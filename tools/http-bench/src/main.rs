@@ -122,8 +122,8 @@ async fn inner_build_app(override_bind: Option<String>) -> (Application, u16) {
     // Allow `BENCH_DATABASE_URL` to swap the bench DB onto Postgres for the
     // I/O-shaped endpoints (`/db-trivial`, `/db-row`). Default stays sqlite
     // in-memory so the existing in-process loopback runs unchanged.
-    let db_url = std::env::var("BENCH_DATABASE_URL")
-        .unwrap_or_else(|_| "sqlite::memory:".to_string());
+    let db_url =
+        std::env::var("BENCH_DATABASE_URL").unwrap_or_else(|_| "sqlite::memory:".to_string());
     std::env::set_var("DATABASE_URL", &db_url);
     std::env::set_var("APP_KEY", "spark-bench-key-32-bytes-pleaserr");
 
@@ -252,9 +252,18 @@ async fn db_trivial_handler(
 ) -> std::result::Result<Json<serde_json::Value>, axum::http::StatusCode> {
     let pool = c.driver_pool();
     let ok = match &pool {
-        cast_core::Pool::Sqlite(p) => sqlx::query_scalar::<_, i64>("SELECT 1").fetch_one(p).await.is_ok(),
-        cast_core::Pool::Postgres(p) => sqlx::query_scalar::<_, i64>("SELECT 1").fetch_one(p).await.is_ok(),
-        cast_core::Pool::MySql(p) => sqlx::query_scalar::<_, i64>("SELECT 1").fetch_one(p).await.is_ok(),
+        cast_core::Pool::Sqlite(p) => sqlx::query_scalar::<_, i64>("SELECT 1")
+            .fetch_one(p)
+            .await
+            .is_ok(),
+        cast_core::Pool::Postgres(p) => sqlx::query_scalar::<_, i64>("SELECT 1")
+            .fetch_one(p)
+            .await
+            .is_ok(),
+        cast_core::Pool::MySql(p) => sqlx::query_scalar::<_, i64>("SELECT 1")
+            .fetch_one(p)
+            .await
+            .is_ok(),
     };
     if !ok {
         return Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
@@ -269,15 +278,21 @@ async fn db_row_handler(
 ) -> std::result::Result<Json<serde_json::Value>, axum::http::StatusCode> {
     let pool = c.driver_pool();
     let row: std::result::Result<(i64, String, String), _> = match &pool {
-        cast_core::Pool::Sqlite(p) => sqlx::query_as("SELECT id, name, payload FROM bench_rows WHERE id = 1")
-            .fetch_one(p)
-            .await,
-        cast_core::Pool::Postgres(p) => sqlx::query_as("SELECT id, name, payload FROM bench_rows WHERE id = 1")
-            .fetch_one(p)
-            .await,
-        cast_core::Pool::MySql(p) => sqlx::query_as("SELECT id, name, payload FROM bench_rows WHERE id = 1")
-            .fetch_one(p)
-            .await,
+        cast_core::Pool::Sqlite(p) => {
+            sqlx::query_as("SELECT id, name, payload FROM bench_rows WHERE id = 1")
+                .fetch_one(p)
+                .await
+        }
+        cast_core::Pool::Postgres(p) => {
+            sqlx::query_as("SELECT id, name, payload FROM bench_rows WHERE id = 1")
+                .fetch_one(p)
+                .await
+        }
+        cast_core::Pool::MySql(p) => {
+            sqlx::query_as("SELECT id, name, payload FROM bench_rows WHERE id = 1")
+                .fetch_one(p)
+                .await
+        }
     };
     match row {
         Ok((id, name, payload)) => Ok(Json(

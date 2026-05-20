@@ -172,7 +172,11 @@ async fn main() -> anyhow::Result<()> {
     )?;
 
     println!();
-    println!("  ✓ scaffolded {} ({}, tiny mode)", root.display(), pkg_name);
+    println!(
+        "  ✓ scaffolded {} ({}, tiny mode)",
+        root.display(),
+        pkg_name
+    );
     println!();
     println!("  next:");
     println!("    cd {} && cargo run", root.display());
@@ -222,10 +226,7 @@ fn replace_env_key(contents: &str, key: &str, value: &str) -> String {
         .lines()
         .map(|line| {
             let trimmed = line.trim_start();
-            if !found
-                && trimmed.starts_with(key)
-                && trimmed[key.len()..].starts_with('=')
-            {
+            if !found && trimmed.starts_with(key) && trimmed[key.len()..].starts_with('=') {
                 found = true;
                 format!("{key}={value}")
             } else {
@@ -375,38 +376,59 @@ impl DbPlan {
                 match fs::OpenOptions::new()
                     .create(true)
                     .write(true)
+                    .truncate(false)
                     .open(&abs)
                 {
-                    Ok(_) => ProvisionStatus::ok(format!(
-                        "created SQLite DB at {}",
-                        file.display()
-                    )),
+                    Ok(_) => {
+                        ProvisionStatus::ok(format!("created SQLite DB at {}", file.display()))
+                    }
                     Err(e) => ProvisionStatus::warn(format!(
                         "could not touch SQLite file {}: {e}. It'll be created on first connect.",
                         file.display()
                     )),
                 }
             }
-            DbPlan::Postgres { db_name, host, port, user, .. } => {
+            DbPlan::Postgres {
+                db_name,
+                host,
+                port,
+                user,
+                ..
+            } => {
                 let bin = find_client_bin("psql");
                 let mut cmd = std::process::Command::new(&bin);
                 cmd.args([
-                    "-h", host,
-                    "-p", &port.to_string(),
-                    "-U", user,
-                    "-d", "postgres",
-                    "-v", "ON_ERROR_STOP=1",
-                    "-c", &format!("CREATE DATABASE \"{db_name}\""),
+                    "-h",
+                    host,
+                    "-p",
+                    &port.to_string(),
+                    "-U",
+                    user,
+                    "-d",
+                    "postgres",
+                    "-v",
+                    "ON_ERROR_STOP=1",
+                    "-c",
+                    &format!("CREATE DATABASE \"{db_name}\""),
                 ]);
                 run_create_db("PostgreSQL", db_name, &bin, cmd)
             }
-            DbPlan::Mysql { db_name, host, port, user, .. } => {
+            DbPlan::Mysql {
+                db_name,
+                host,
+                port,
+                user,
+                ..
+            } => {
                 let bin = find_client_bin("mysql");
                 let mut cmd = std::process::Command::new(&bin);
                 cmd.args([
-                    "-h", host,
-                    "-P", &port.to_string(),
-                    "-u", user,
+                    "-h",
+                    host,
+                    "-P",
+                    &port.to_string(),
+                    "-u",
+                    user,
                     "-e",
                     &format!("CREATE DATABASE `{db_name}`"),
                 ]);
@@ -2242,7 +2264,13 @@ mod db_plan_tests {
     fn postgres_shorthand_resolves_to_herd_defaults() {
         let plan = DbPlan::resolve(Some("postgres"), "blog").unwrap();
         match plan {
-            DbPlan::Postgres { url, db_name, host, port, user } => {
+            DbPlan::Postgres {
+                url,
+                db_name,
+                host,
+                port,
+                user,
+            } => {
                 assert_eq!(url, "postgres://postgres@127.0.0.1:5432/blog");
                 assert_eq!(db_name, "blog");
                 assert_eq!(host, "127.0.0.1");
@@ -2257,7 +2285,13 @@ mod db_plan_tests {
     fn mysql_shorthand_resolves_to_herd_defaults() {
         let plan = DbPlan::resolve(Some("mysql"), "blog").unwrap();
         match plan {
-            DbPlan::Mysql { url, db_name, host, port, user } => {
+            DbPlan::Mysql {
+                url,
+                db_name,
+                host,
+                port,
+                user,
+            } => {
                 assert_eq!(url, "mysql://root@127.0.0.1:3306/blog");
                 assert_eq!(db_name, "blog");
                 assert_eq!(host, "127.0.0.1");
@@ -2270,10 +2304,19 @@ mod db_plan_tests {
 
     #[test]
     fn full_postgres_url_is_parsed_for_provisioning() {
-        let plan =
-            DbPlan::resolve(Some("postgres://alice:secret@db.local:6543/shop"), "ignored").unwrap();
+        let plan = DbPlan::resolve(
+            Some("postgres://alice:secret@db.local:6543/shop"),
+            "ignored",
+        )
+        .unwrap();
         match plan {
-            DbPlan::Postgres { url, db_name, host, port, user } => {
+            DbPlan::Postgres {
+                url,
+                db_name,
+                host,
+                port,
+                user,
+            } => {
                 assert_eq!(url, "postgres://alice:secret@db.local:6543/shop");
                 assert_eq!(db_name, "shop");
                 assert_eq!(host, "db.local");
@@ -2318,6 +2361,9 @@ mod db_plan_tests {
     fn replace_env_key_appends_when_missing() {
         let env = "APP_KEY=\"x\"\n";
         let out = replace_env_key(env, "DATABASE_URL", "postgres://127.0.0.1/blog");
-        assert_eq!(out, "APP_KEY=\"x\"\nDATABASE_URL=postgres://127.0.0.1/blog\n");
+        assert_eq!(
+            out,
+            "APP_KEY=\"x\"\nDATABASE_URL=postgres://127.0.0.1/blog\n"
+        );
     }
 }

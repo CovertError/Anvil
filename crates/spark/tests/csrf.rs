@@ -63,10 +63,7 @@ fn empty_update_body(token: Option<&str>) -> String {
 }
 
 async fn seed_session(app: Router) -> (Router, String) {
-    let seed = Request::builder()
-        .uri("/seed")
-        .body(Body::empty())
-        .unwrap();
+    let seed = Request::builder().uri("/seed").body(Body::empty()).unwrap();
     let resp = app.clone().oneshot(seed).await.expect("seed");
     assert_eq!(resp.status(), StatusCode::OK);
     let cookie = resp
@@ -110,24 +107,14 @@ async fn no_session_means_no_csrf_check() {
 #[tokio::test]
 async fn matching_token_passes() {
     let (app, cookie) = seed_session(build_app().await).await;
-    let (status, _) = post_update(
-        app,
-        Some(&cookie),
-        empty_update_body(Some(SEED_TOKEN)),
-    )
-    .await;
+    let (status, _) = post_update(app, Some(&cookie), empty_update_body(Some(SEED_TOKEN))).await;
     assert_eq!(status, StatusCode::OK);
 }
 
 #[tokio::test]
 async fn mismatched_token_is_rejected_with_419() {
     let (app, cookie) = seed_session(build_app().await).await;
-    let (status, _) = post_update(
-        app,
-        Some(&cookie),
-        empty_update_body(Some("wrong-token")),
-    )
-    .await;
+    let (status, _) = post_update(app, Some(&cookie), empty_update_body(Some("wrong-token"))).await;
     assert_eq!(status.as_u16(), 419, "expected HTTP 419 PAGE_EXPIRED");
 }
 

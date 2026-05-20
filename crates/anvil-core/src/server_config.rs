@@ -226,7 +226,10 @@ pub struct LimitsConfig {
     /// to complete before dropping them. Default 10s matches SystemD's
     /// typical drain window. Raise for long-poll / large-upload workloads,
     /// lower for fast-iteration deploys.
-    #[serde(deserialize_with = "deserialize_duration", default = "default_drain_timeout")]
+    #[serde(
+        deserialize_with = "deserialize_duration",
+        default = "default_drain_timeout"
+    )]
     pub drain_timeout: Duration,
 
     /// Maximum concurrent in-flight requests across the whole server.

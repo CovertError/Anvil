@@ -46,9 +46,7 @@ pub mod prelude {
     // Facade-style ambient helpers — usable inside any request task.
     // Optional: handlers can still take `State<Container>` if they prefer
     // explicit dependency injection.
-    pub use crate::facade::{
-        app as facade_app, cache, config, db, events, mailer, queue, storage,
-    };
+    pub use crate::facade::{app as facade_app, cache, config, db, events, mailer, queue, storage};
     pub use crate::middleware::MiddlewareRegistry;
     pub use crate::request::{
         App, Form, HeaderMap, Json, Method, Path, Query, State, StatusCode, Uri,

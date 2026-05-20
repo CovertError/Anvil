@@ -177,12 +177,9 @@ async fn future_wire_version_yields_426() {
         },
     );
     envelope.v = 99; // future version
-    // Recompute checksum so the HMAC isn't the failure reason.
+                     // Recompute checksum so the HMAC isn't the failure reason.
     let json = serde_json::to_vec(&envelope).unwrap();
-    let wire = base64::Engine::encode(
-        &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-        &json,
-    );
+    let wire = base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, &json);
 
     let (status, _) = send_update(app, update_body(&wire)).await;
     assert_eq!(status.as_u16(), 426);

@@ -400,7 +400,9 @@ fn maybe_offer_speedup_install() -> Result<()> {
     let install = if interactive {
         inquire::Confirm::new("install the missing tools now?")
             .with_default(false)
-            .with_help_message("press y to run the install commands; n to keep current setup (we'll stop asking)")
+            .with_help_message(
+                "press y to run the install commands; n to keep current setup (we'll stop asking)",
+            )
             .prompt()
             .unwrap_or(false)
     } else {
@@ -444,7 +446,11 @@ fn cargo_subcommand_present(name: &str) -> bool {
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.trim().starts_with(name)))
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .any(|l| l.trim().starts_with(name))
+        })
         .unwrap_or(false)
 }
 

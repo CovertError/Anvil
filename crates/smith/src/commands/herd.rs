@@ -14,7 +14,7 @@
 //!     service. `herd:link` defaults to 8081 to dodge that out of the box.
 //!   - Herd is macOS/Windows only; on Linux this command bails with a hint.
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -156,10 +156,7 @@ fn upsert(contents: &str, key: &str, value: &str) -> String {
         .lines()
         .map(|line| {
             let trimmed = line.trim_start();
-            if !found
-                && trimmed.starts_with(key)
-                && trimmed[key.len()..].starts_with('=')
-            {
+            if !found && trimmed.starts_with(key) && trimmed[key.len()..].starts_with('=') {
                 found = true;
                 format!("{key}={value}")
             } else {

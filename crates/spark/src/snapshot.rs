@@ -85,12 +85,7 @@ impl Envelope {
     /// Build a fresh envelope, signing under the named key and stamping `kid`
     /// into the envelope so the verifier can pick the same key out of the
     /// rotation set.
-    pub fn build_with_kid(
-        kid: u8,
-        app_key: &str,
-        data: serde_json::Value,
-        memo: Memo,
-    ) -> Self {
+    pub fn build_with_kid(kid: u8, app_key: &str, data: serde_json::Value, memo: Memo) -> Self {
         let checksum = compute_checksum(app_key, &data, &memo);
         Self {
             v: 1,
@@ -362,7 +357,10 @@ mod tests {
     #[test]
     fn parse_keyring_handles_whitespace_and_skips_garbage() {
         let parsed = parse_keyring(" 1:keyA , bad , 2:keyB,");
-        assert_eq!(parsed, vec![(1, "keyA".to_string()), (2, "keyB".to_string())]);
+        assert_eq!(
+            parsed,
+            vec![(1, "keyA".to_string()), (2, "keyB".to_string())]
+        );
     }
 
     #[test]
@@ -370,7 +368,12 @@ mod tests {
         // Sign under kid=2, verify under a keyring whose active key is
         // kid=3 — the rotation case where a snapshot was issued under
         // the previous key and the server has since rotated forward.
-        let env = Envelope::build_with_kid(2, "old-key-thirty-two-bytes-padding", json!({"x": 1}), sample_memo());
+        let env = Envelope::build_with_kid(
+            2,
+            "old-key-thirty-two-bytes-padding",
+            json!({"x": 1}),
+            sample_memo(),
+        );
         let wire = encode(&env, "old-key-thirty-two-bytes-padding", false).unwrap();
 
         let keys: &[(u8, &str)] = &[
@@ -398,8 +401,15 @@ mod tests {
         let envelope = Envelope::build(KEY, data.clone(), sample_memo());
         let wire = encode(&envelope, KEY, false).unwrap();
 
-        assert!(wire.starts_with("gz:"), "wire should be gzip-framed; got `{}`...", &wire[..20.min(wire.len())]);
-        assert!(wire.len() < 8 * 1024, "gzipped payload must be smaller than raw");
+        assert!(
+            wire.starts_with("gz:"),
+            "wire should be gzip-framed; got `{}`...",
+            &wire[..20.min(wire.len())]
+        );
+        assert!(
+            wire.len() < 8 * 1024,
+            "gzipped payload must be smaller than raw"
+        );
 
         let decoded = decode(&wire, KEY).unwrap();
         assert_eq!(decoded.data, data);
