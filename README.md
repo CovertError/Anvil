@@ -57,6 +57,8 @@ anvil bench:full                  # both, in sequence
 anvil fmt                         # cargo fmt --all
 anvil lint                        # cargo clippy --workspace --all-targets
 anvil install                     # `cargo install` this CLI into ~/.cargo/bin
+anvil update                      # update the `anvil` binary to the latest crates.io release
+anvil update --check              # show what's new without installing
 
 anvil mcp                         # start the Boost MCP server (AI agents)
 anvil boost:install               # write AGENTS.md + .mcp.json
@@ -119,7 +121,7 @@ codegen backend, and the hot-patch ABI limits — lives in
 
 ## Status
 
-POC. The architecture is validated end-to-end against `examples/blog`. Initial publish to crates.io is in progress — versions start at `0.1.0`.
+POC. The architecture is validated end-to-end against `examples/blog`. Published on crates.io as of `0.3.x` — `cargo install anvilforge-cli` works.
 
 ## License
 

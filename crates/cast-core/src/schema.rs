@@ -108,10 +108,78 @@ pub struct Table {
     driver: Driver,
     columns: Vec<ColumnDef>,
     indexes: Vec<String>,
-    foreign_keys: Vec<String>,
+    foreign_keys: Vec<PendingFk>,
     drops: Vec<String>,
     renames: Vec<(String, String)>,
-    alters: Vec<String>,
+    checks: Vec<PendingCheck>,
+}
+
+#[derive(Clone)]
+struct PendingFk {
+    column: String,
+    ref_table: String,
+    ref_col: String,
+    on_delete: Option<String>,
+    on_update: Option<String>,
+}
+
+impl PendingFk {
+    fn constraint_name(&self, table: &str) -> String {
+        format!("fk_{}_{}", table, self.column)
+    }
+
+    fn actions(&self) -> String {
+        let mut s = String::new();
+        if let Some(action) = &self.on_delete {
+            s.push_str(&format!(" ON DELETE {action}"));
+        }
+        if let Some(action) = &self.on_update {
+            s.push_str(&format!(" ON UPDATE {action}"));
+        }
+        s
+    }
+
+    fn inline_clause(&self, table: &str) -> String {
+        format!(
+            "CONSTRAINT {} FOREIGN KEY ({}) REFERENCES {} ({}){}",
+            self.constraint_name(table),
+            self.column,
+            self.ref_table,
+            self.ref_col,
+            self.actions(),
+        )
+    }
+
+    fn alter_sql(&self, table: &str) -> String {
+        format!(
+            "ALTER TABLE {} ADD CONSTRAINT {} FOREIGN KEY ({}) REFERENCES {} ({}){}",
+            table,
+            self.constraint_name(table),
+            self.column,
+            self.ref_table,
+            self.ref_col,
+            self.actions(),
+        )
+    }
+}
+
+#[derive(Clone)]
+struct PendingCheck {
+    name: String,
+    expr: String,
+}
+
+impl PendingCheck {
+    fn inline_clause(&self) -> String {
+        format!("CONSTRAINT {} CHECK ({})", self.name, self.expr)
+    }
+
+    fn alter_sql(&self, table: &str) -> String {
+        format!(
+            "ALTER TABLE {} ADD CONSTRAINT {} CHECK ({})",
+            table, self.name, self.expr
+        )
+    }
 }
 
 impl Table {
@@ -125,7 +193,7 @@ impl Table {
             foreign_keys: Vec::new(),
             drops: Vec::new(),
             renames: Vec::new(),
-            alters: Vec::new(),
+            checks: Vec::new(),
         }
     }
 
@@ -183,20 +251,18 @@ impl Table {
     /// Postgres has no native unsigned types, so this is a synonym for `big_integer`
     /// with a `>= 0` check constraint. Provided for Laravel parity.
     pub fn unsigned_big_integer(&mut self, name: &str) -> &mut ColumnDef {
-        let check = format!(
-            "ALTER TABLE {} ADD CONSTRAINT {}_{}_unsigned CHECK ({} >= 0)",
-            self.name, self.name, name, name
-        );
-        self.alters.push(check);
+        self.checks.push(PendingCheck {
+            name: format!("{}_{}_unsigned", self.name, name),
+            expr: format!("{} >= 0", name),
+        });
         self.push_column(name, ColumnType::BigInteger)
     }
 
     pub fn unsigned_integer(&mut self, name: &str) -> &mut ColumnDef {
-        let check = format!(
-            "ALTER TABLE {} ADD CONSTRAINT {}_{}_unsigned CHECK ({} >= 0)",
-            self.name, self.name, name, name
-        );
-        self.alters.push(check);
+        self.checks.push(PendingCheck {
+            name: format!("{}_{}_unsigned", self.name, name),
+            expr: format!("{} >= 0", name),
+        });
         self.push_column(name, ColumnType::Integer)
     }
 
@@ -259,11 +325,10 @@ impl Table {
             .map(|v| format!("'{}'", v.replace('\'', "''")))
             .collect::<Vec<_>>()
             .join(", ");
-        let check = format!(
-            "ALTER TABLE {} ADD CONSTRAINT {}_{}_enum CHECK ({} IN ({}))",
-            self.name, self.name, name, name, list
-        );
-        self.alters.push(check);
+        self.checks.push(PendingCheck {
+            name: format!("{}_{}_enum", self.name, name),
+            expr: format!("{} IN ({})", name, list),
+        });
         self.push_column(name, ColumnType::String(sea_query::StringLen::N(64)))
     }
 
@@ -402,11 +467,13 @@ impl Table {
     /// - `t.foreign_id_for("user_id", "users")` — most common pattern
     /// - `t.big_integer("user_id")` + `t.foreign("user_id").references("id").on("users")` — explicit
     pub fn foreign_id_for(&mut self, name: &str, references: &str) -> &mut ColumnDef {
-        let fk_sql = format!(
-            "ALTER TABLE {} ADD CONSTRAINT fk_{}_{} FOREIGN KEY ({}) REFERENCES {} (id) ON DELETE CASCADE",
-            self.name, self.name, name, name, references
-        );
-        self.foreign_keys.push(fk_sql);
+        self.foreign_keys.push(PendingFk {
+            column: name.to_string(),
+            ref_table: references.to_string(),
+            ref_col: "id".to_string(),
+            on_delete: Some("CASCADE".to_string()),
+            on_update: None,
+        });
         self.push_column(name, ColumnType::BigInteger)
     }
 
@@ -415,7 +482,6 @@ impl Table {
     pub fn foreign(&mut self, column: &str) -> ForeignKeyBuilder<'_> {
         ForeignKeyBuilder {
             table: &mut self.foreign_keys,
-            table_name: self.name.clone(),
             column: column.to_string(),
             ref_col: "id".to_string(),
             ref_table: String::new(),
@@ -508,7 +574,37 @@ impl Table {
                 for col in &self.columns {
                     t.col(col.sea_def.clone());
                 }
-                out.push(build_per_driver(&t, self.driver));
+                let mut sql = build_per_driver(&t, self.driver);
+
+                // Inline FK + CHECK constraints inside the CREATE TABLE body.
+                // SQLite has no `ALTER TABLE … ADD CONSTRAINT`, so emitting them
+                // post-create only works on Postgres/MySQL; inline is portable.
+                let mut inline = Vec::new();
+                for fk in &self.foreign_keys {
+                    inline.push(fk.inline_clause(&self.name));
+                }
+                for chk in &self.checks {
+                    inline.push(chk.inline_clause());
+                }
+                if !inline.is_empty() {
+                    let trimmed_len = sql.trim_end().len();
+                    if trimmed_len > 0 && sql.as_bytes()[trimmed_len - 1] == b')' {
+                        let injection = format!(", {}", inline.join(", "));
+                        sql.insert_str(trimmed_len - 1, &injection);
+                    } else {
+                        // Fallback: shouldn't happen for sea_query CREATE TABLE
+                        // output, but if the SQL doesn't end in `)`, fall back to
+                        // post-table ALTER statements (Postgres/MySQL only).
+                        for fk in &self.foreign_keys {
+                            out.push(fk.alter_sql(&self.name));
+                        }
+                        for chk in &self.checks {
+                            out.push(chk.alter_sql(&self.name));
+                        }
+                    }
+                }
+
+                out.push(sql);
             }
             TableMode::Alter => {
                 // `ALTER TABLE ... ADD COLUMN ...` per column added.
@@ -517,6 +613,23 @@ impl Table {
                     t.table(sea_query::Alias::new(&self.name));
                     t.add_column(col.sea_def.clone());
                     out.push(build_alter_per_driver(&t, self.driver));
+                }
+
+                let has_constraints = !self.foreign_keys.is_empty() || !self.checks.is_empty();
+                if self.driver == Driver::Sqlite && has_constraints {
+                    tracing::warn!(
+                        table = %self.name,
+                        fks = self.foreign_keys.len(),
+                        checks = self.checks.len(),
+                        "SQLite does not support ALTER TABLE ADD CONSTRAINT; FK/CHECK additions on existing tables are skipped. Recreate the table with the constraint inline.",
+                    );
+                } else {
+                    for fk in &self.foreign_keys {
+                        out.push(fk.alter_sql(&self.name));
+                    }
+                    for chk in &self.checks {
+                        out.push(chk.alter_sql(&self.name));
+                    }
                 }
             }
         }
@@ -528,8 +641,6 @@ impl Table {
         }
         out.extend(self.drops);
         out.extend(self.indexes);
-        out.extend(self.foreign_keys);
-        out.extend(self.alters);
         out
     }
 }
@@ -537,8 +648,7 @@ impl Table {
 /// Fluent builder returned by `Table::foreign(col)`. Drop it (or call `.constrain()`)
 /// to commit the foreign key SQL.
 pub struct ForeignKeyBuilder<'a> {
-    table: &'a mut Vec<String>,
-    table_name: String,
+    table: &'a mut Vec<PendingFk>,
     column: String,
     ref_col: String,
     ref_table: String,
@@ -595,18 +705,13 @@ impl<'a> Drop for ForeignKeyBuilder<'a> {
             // No `.on(...)` was called — nothing to emit.
             return;
         }
-        let constraint = format!("fk_{}_{}", self.table_name, self.column);
-        let mut sql = format!(
-            "ALTER TABLE {} ADD CONSTRAINT {} FOREIGN KEY ({}) REFERENCES {} ({})",
-            self.table_name, constraint, self.column, self.ref_table, self.ref_col
-        );
-        if let Some(action) = &self.on_delete {
-            sql.push_str(&format!(" ON DELETE {action}"));
-        }
-        if let Some(action) = &self.on_update {
-            sql.push_str(&format!(" ON UPDATE {action}"));
-        }
-        self.table.push(sql);
+        self.table.push(PendingFk {
+            column: std::mem::take(&mut self.column),
+            ref_table: std::mem::take(&mut self.ref_table),
+            ref_col: std::mem::take(&mut self.ref_col),
+            on_delete: self.on_delete.take(),
+            on_update: self.on_update.take(),
+        });
     }
 }
 
@@ -638,8 +743,27 @@ impl ColumnDef {
         self
     }
 
+    /// Set the column default. String values that look like SQL string literals
+    /// (no parens, not already quoted, not numeric, not a recognized keyword)
+    /// are auto-quoted to avoid Postgres parsing them as column references.
+    /// Use [`default_raw`](Self::default_raw) to bypass quoting entirely.
     pub fn default(&mut self, value: impl Into<String>) -> &mut Self {
-        self.sea_def.default(sea_query::Expr::cust(value.into()));
+        let v = value.into();
+        let expr = if looks_like_sql_expr(&v) {
+            v
+        } else {
+            format!("'{}'", v.replace('\'', "''"))
+        };
+        self.sea_def.default(sea_query::Expr::cust(expr));
+        self
+    }
+
+    /// Set the default to raw SQL — no quoting, no parsing. Use this when you
+    /// need to pass a specific expression (a cast like `'{}'::jsonb`, a function
+    /// reference like `gen_random_uuid()`, etc.) and don't want the auto-quoting
+    /// in [`default`](Self::default).
+    pub fn default_raw(&mut self, sql: impl Into<String>) -> &mut Self {
+        self.sea_def.default(sea_query::Expr::cust(sql.into()));
         self
     }
 
@@ -664,6 +788,41 @@ impl ColumnDef {
     }
 }
 
+/// Heuristic: should this default value be passed to SQL verbatim, or quoted
+/// as a string literal? Returns `true` for things that already look like a SQL
+/// expression (quoted strings, numbers, function calls, known keywords).
+fn looks_like_sql_expr(value: &str) -> bool {
+    let v = value.trim();
+    if v.is_empty() {
+        return true;
+    }
+    // Already-quoted string / identifier.
+    if v.starts_with('\'') || v.starts_with('"') || v.starts_with('`') {
+        return true;
+    }
+    // Numeric literal (int or float, signed).
+    if v.parse::<f64>().is_ok() {
+        return true;
+    }
+    // Function call or any sub-expression in parens.
+    if v.contains('(') {
+        return true;
+    }
+    // Recognized keywords / time functions used as bare defaults.
+    matches!(
+        v.to_ascii_uppercase().as_str(),
+        "TRUE"
+            | "FALSE"
+            | "NULL"
+            | "CURRENT_TIMESTAMP"
+            | "CURRENT_DATE"
+            | "CURRENT_TIME"
+            | "NOW"
+            | "LOCALTIMESTAMP"
+            | "LOCALTIME"
+    )
+}
+
 // ─── per-driver SQL emission ────────────────────────────────────────────────
 
 fn build_per_driver(t: &sea_query::TableCreateStatement, driver: Driver) -> String {
@@ -679,5 +838,214 @@ fn build_alter_per_driver(t: &sea_query::TableAlterStatement, driver: Driver) ->
         Driver::Postgres => t.build(PostgresQueryBuilder),
         Driver::MySql => t.build(MysqlQueryBuilder),
         Driver::Sqlite => t.build(SqliteQueryBuilder),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_stmts(driver: Driver, f: impl FnOnce(&mut Table)) -> Vec<String> {
+        let mut t = Table::new("posts", TableMode::Create, driver);
+        f(&mut t);
+        t.into_statements()
+    }
+
+    fn alter_stmts(driver: Driver, f: impl FnOnce(&mut Table)) -> Vec<String> {
+        let mut t = Table::new("posts", TableMode::Alter, driver);
+        f(&mut t);
+        t.into_statements()
+    }
+
+    #[test]
+    fn foreign_id_for_inlines_fk_in_create_on_sqlite() {
+        // Regression: previously emitted `ALTER TABLE … ADD CONSTRAINT …` which
+        // SQLite rejects with `near "CONSTRAINT": syntax error`.
+        let stmts = create_stmts(Driver::Sqlite, |t| {
+            t.id();
+            t.foreign_id_for("user_id", "users");
+        });
+        let create = stmts
+            .iter()
+            .find(|s| s.starts_with("CREATE TABLE"))
+            .unwrap();
+        assert!(
+            create.contains("FOREIGN KEY"),
+            "FK should be inline in CREATE TABLE, got: {create}"
+        );
+        assert!(
+            create.contains("REFERENCES users (id)"),
+            "FK target should be inline, got: {create}"
+        );
+        assert!(
+            create.contains("ON DELETE CASCADE"),
+            "FK action should be inline, got: {create}"
+        );
+        assert!(
+            !stmts.iter().any(|s| s.starts_with("ALTER TABLE")),
+            "no ALTER TABLE should be emitted on SQLite, got: {stmts:?}"
+        );
+    }
+
+    #[test]
+    fn foreign_id_for_inlines_fk_in_create_on_postgres() {
+        let stmts = create_stmts(Driver::Postgres, |t| {
+            t.id();
+            t.foreign_id_for("user_id", "users");
+        });
+        let create = stmts
+            .iter()
+            .find(|s| s.starts_with("CREATE TABLE"))
+            .unwrap();
+        assert!(create.contains("FOREIGN KEY"));
+        assert!(create.contains("REFERENCES users (id)"));
+        assert!(!stmts.iter().any(|s| s.starts_with("ALTER TABLE")));
+    }
+
+    #[test]
+    fn explicit_foreign_builder_inlines_in_create() {
+        let stmts = create_stmts(Driver::Sqlite, |t| {
+            t.id();
+            t.big_integer("user_id").not_null();
+            t.foreign("user_id").references("id").on("users").cascade();
+        });
+        let create = stmts
+            .iter()
+            .find(|s| s.starts_with("CREATE TABLE"))
+            .unwrap();
+        assert!(create.contains("FOREIGN KEY (user_id)"));
+        assert!(create.contains("ON DELETE CASCADE"));
+    }
+
+    #[test]
+    fn unsigned_inlines_check_constraint() {
+        let stmts = create_stmts(Driver::Sqlite, |t| {
+            t.unsigned_big_integer("balance");
+        });
+        let create = stmts
+            .iter()
+            .find(|s| s.starts_with("CREATE TABLE"))
+            .unwrap();
+        assert!(
+            create.contains("CHECK (balance >= 0)"),
+            "CHECK should be inline, got: {create}"
+        );
+        assert!(!stmts.iter().any(|s| s.starts_with("ALTER TABLE")));
+    }
+
+    #[test]
+    fn enum_col_inlines_check_constraint() {
+        let stmts = create_stmts(Driver::Sqlite, |t| {
+            t.enum_col("status", &["draft", "published"]);
+        });
+        let create = stmts
+            .iter()
+            .find(|s| s.starts_with("CREATE TABLE"))
+            .unwrap();
+        assert!(create.contains("CHECK (status IN ('draft', 'published'))"));
+    }
+
+    #[test]
+    fn alter_mode_emits_alter_table_on_postgres() {
+        let stmts = alter_stmts(Driver::Postgres, |t| {
+            t.foreign("user_id").references("id").on("users").cascade();
+        });
+        assert!(stmts
+            .iter()
+            .any(|s| s.contains("ALTER TABLE posts ADD CONSTRAINT")
+                && s.contains("FOREIGN KEY (user_id)")));
+    }
+
+    #[test]
+    fn alter_mode_skips_fk_on_sqlite() {
+        // SQLite truly doesn't support adding FK to an existing table — we warn
+        // and skip rather than emitting invalid SQL.
+        let stmts = alter_stmts(Driver::Sqlite, |t| {
+            t.foreign("user_id").references("id").on("users").cascade();
+        });
+        assert!(
+            !stmts.iter().any(|s| s.contains("ADD CONSTRAINT")),
+            "no ADD CONSTRAINT on SQLite alter, got: {stmts:?}"
+        );
+    }
+
+    #[test]
+    fn default_quotes_string_literals() {
+        let stmts = create_stmts(Driver::Postgres, |t| {
+            t.string("status").not_null().default("pending");
+        });
+        let create = &stmts[0];
+        assert!(
+            create.contains("DEFAULT 'pending'"),
+            "string default should be auto-quoted, got: {create}"
+        );
+    }
+
+    #[test]
+    fn default_preserves_already_quoted() {
+        let stmts = create_stmts(Driver::Postgres, |t| {
+            t.string("status").default("'pending'");
+        });
+        assert!(stmts[0].contains("DEFAULT 'pending'"));
+        // Should not double-quote.
+        assert!(!stmts[0].contains("'''"));
+    }
+
+    #[test]
+    fn default_preserves_numeric_literal() {
+        let stmts = create_stmts(Driver::Postgres, |t| {
+            t.integer("attempts").default("0");
+            t.integer("max").default("3");
+            t.float("ratio").default("1.5");
+        });
+        assert!(stmts[0].contains("DEFAULT 0"));
+        assert!(stmts[0].contains("DEFAULT 3"));
+        assert!(stmts[0].contains("DEFAULT 1.5"));
+    }
+
+    #[test]
+    fn default_preserves_boolean_keywords() {
+        let stmts = create_stmts(Driver::Postgres, |t| {
+            t.boolean("active").default("true");
+            t.boolean("paid").default("false");
+        });
+        assert!(stmts[0].contains("DEFAULT TRUE") || stmts[0].contains("DEFAULT true"));
+        assert!(stmts[0].contains("DEFAULT FALSE") || stmts[0].contains("DEFAULT false"));
+    }
+
+    #[test]
+    fn default_preserves_current_timestamp() {
+        let stmts = create_stmts(Driver::Postgres, |t| {
+            t.timestamp("ts").default("CURRENT_TIMESTAMP");
+        });
+        assert!(stmts[0].contains("DEFAULT CURRENT_TIMESTAMP"));
+    }
+
+    #[test]
+    fn default_preserves_function_call() {
+        let stmts = create_stmts(Driver::Postgres, |t| {
+            t.uuid("id").default("gen_random_uuid()");
+        });
+        assert!(stmts[0].contains("DEFAULT gen_random_uuid()"));
+    }
+
+    #[test]
+    fn default_escapes_embedded_quotes() {
+        let stmts = create_stmts(Driver::Postgres, |t| {
+            t.string("note").default("O'Reilly");
+        });
+        assert!(
+            stmts[0].contains("DEFAULT 'O''Reilly'"),
+            "embedded quote should be escaped, got: {}",
+            stmts[0]
+        );
+    }
+
+    #[test]
+    fn default_raw_bypasses_quoting() {
+        let stmts = create_stmts(Driver::Postgres, |t| {
+            t.jsonb("meta").default_raw("'{}'::jsonb");
+        });
+        assert!(stmts[0].contains("DEFAULT '{}'::jsonb"));
     }
 }

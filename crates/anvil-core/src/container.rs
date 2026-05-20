@@ -213,7 +213,7 @@ impl ContainerBuilder {
             None => QueueHandle::in_memory_no_pool(),
         });
         if pg_default.is_none() {
-            tracing::info!(
+            tracing::debug!(
                 driver = ?default_driver_pool.driver(),
                 "default connection is non-Postgres — `c.pool()` will panic; use `c.driver_pool()` instead."
             );

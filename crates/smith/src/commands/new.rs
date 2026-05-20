@@ -647,7 +647,7 @@ anvilforge = {anvilforge_dep}
 tokio = {{ version = "1", features = ["full"] }}
 serde = {{ version = "1", features = ["derive"] }}
 serde_json = "1"
-sqlx = {{ version = "0.8", features = ["runtime-tokio-rustls", "postgres"] }}
+sqlx = {{ version = "0.8", features = ["runtime-tokio-rustls", "postgres", "sqlite", "mysql"] }}
 async-trait = "0.1"
 thiserror = "1"
 anyhow = "1"
@@ -683,7 +683,9 @@ APP_DEBUG=true
 APP_URL=http://localhost:8080
 APP_ADDR=127.0.0.1:8080
 
-LOG_LEVEL=debug
+# Default filter: debug for your app, warn for noisy crates. Override with
+# RUST_LOG-style directives, e.g. `info,sqlx=debug` to debug DB queries.
+LOG_LEVEL=debug,sqlx=warn,hyper=warn,tower_http=info
 LOG_FORMAT=pretty
 
 # SQLite by default — zero-config for development, matches `laravel new`'s UX.
@@ -1013,8 +1015,11 @@ use {crate_name}::database::seeders::DatabaseSeeder;
 
 #[tokio::main]
 async fn main() -> Result<()> {{
-    anvilforge::config::load_dotenv();
+    let env_path = anvilforge::config::load_dotenv();
     anvilforge::tracing_init::init();
+    if let Some(path) = env_path {{
+        tracing::info!(path = %path.display(), "loaded .env");
+    }}
 
     let args: Vec<String> = std::env::args().collect();
     let subcommand = args.get(1).map(String::as_str).unwrap_or("serve");
@@ -1180,15 +1185,8 @@ async fn run_migrate_status() -> Result<()> {{
 
 async fn run_db_wipe() -> Result<()> {{
     let pool = build_pool().await?;
-    // `cast::Pool` is the multi-driver wrapper; reach into the underlying
-    // driver-specific sqlx pool to issue raw DDL.
-    if let Some(pg) = pool.as_postgres() {{
-        sqlx::query("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
-            .execute(pg)
-            .await?;
-    }} else {{
-        anyhow::bail!("db:wipe is only implemented for Postgres in the default scaffold");
-    }}
+    let runner = anvilforge::cast::MigrationRunner::new(pool);
+    runner.wipe().await?;
     println!("database wiped");
     Ok(())
 }}
@@ -1425,7 +1423,12 @@ pub struct User {
     pub id: i64,
     pub name: String,
     pub email: String,
-    pub password_hash: String,
+    /// Argon2id PHC string — the hashed password. Named `password` for Laravel
+    /// parity (`$user->password` in PHP is also the hash). Form input arrives
+    /// as `payload.password` (plaintext) and is hashed via `auth::hash_password`
+    /// before insert.
+    #[serde(skip_serializing)]
+    pub password: String,
     pub created_at: Option<DateTime<Utc>>,
     pub updated_at: Option<DateTime<Utc>>,
 }
@@ -1767,7 +1770,7 @@ impl CastMigration for CreateUsersTable {
             t.id();
             t.string("name").not_null();
             t.string("email").not_null().unique();
-            t.string("password_hash").not_null();
+            t.string("password").not_null();
             t.timestamps();
         });
     }
@@ -1889,7 +1892,7 @@ impl Seeder for DatabaseSeeder {
             .unwrap_or(0);
             if count == 0 {
                 anvilforge::cast::sqlx::query(
-                    "INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)",
+                    "INSERT INTO users (name, email, password) VALUES (?, ?, ?)",
                 )
                 .bind("Demo User")
                 .bind("demo@example.com")

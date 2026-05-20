@@ -17,6 +17,7 @@ pub mod queue;
 pub mod repl;
 pub mod routes;
 pub mod schedule;
+pub mod self_update;
 pub mod serve;
 pub mod test;
 

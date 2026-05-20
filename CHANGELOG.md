@@ -7,6 +7,123 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-05-21
+
+### Bug-bash fixes
+
+Showstoppers (broke the default workflow):
+
+- **`Cast::foreign_id_for` is now SQLite-compatible.** Previously every
+  call emitted `ALTER TABLE … ADD CONSTRAINT FOREIGN KEY …`, which SQLite
+  rejects with `near "CONSTRAINT": syntax error`. The schema builder
+  now stores foreign keys as structured `PendingFk` entries and inlines
+  them inside `CREATE TABLE` for all drivers, falling back to
+  `ALTER TABLE` only in Alter mode (with a `tracing::warn!` skip on
+  SQLite, which truly has no `ADD CONSTRAINT` form). Same fix applied
+  to `unsigned_*` / `enum_col` CHECK constraints — they were
+  SQLite-incompatible by the same mechanism.
+- **`ColumnDef::default` auto-quotes string literals.** Previously
+  `t.string("status").default("pending")` produced
+  `DEFAULT pending` → Postgres parsed `pending` as a column reference
+  and bailed. The heuristic passes through numerics, quoted strings,
+  parenthesised function calls, and the keywords
+  `TRUE/FALSE/NULL/CURRENT_TIMESTAMP/CURRENT_DATE/CURRENT_TIME/NOW/LOCALTIMESTAMP/LOCALTIME`,
+  and quotes everything else as a SQL string literal. New `default_raw`
+  method bypasses the heuristic for explicit SQL expressions.
+- **`load_dotenv()` is scoped to the project root.** It used to walk up
+  from cwd unbounded, so running `anvil serve` from a parent directory
+  silently loaded a sibling project's `.env`. It now walks up looking
+  for `config/anvil.toml` (preferred) or `Cargo.toml`, loads `.env`
+  from that directory only, and returns the path so callers can log
+  which file was loaded after `tracing_init`.
+
+Real bugs:
+
+- **Generators auto-update `mod.rs`.** `make:controller`,
+  `make:request`, `make:job`, `make:event`, `make:listener`,
+  `make:mail`, `make:notification`, `make:policy`, `make:rule`,
+  `make:resource`, and `make:factory` now all append the `#[path] mod
+  x; pub use x::X;` line to their sibling `mod.rs`. Previously only
+  `make:migration`, `make:seeder`, and `make:component` did, which was
+  a gratuitous inconsistency.
+- **`make:auth` auto-wires.** Five `mod.rs` files get updated
+  automatically, `routes/mod.rs` gets `pub mod auth;`, and
+  `bootstrap/app.rs` is spliced with `.web(routes::auth::register)`
+  after the existing `.web(routes::web)` anchor. Migration `mod.rs` is
+  registered too. The previous six "manual wiring" steps shrink to one
+  `smith migrate`.
+- **`make:auth` migration is driver-aware and idempotent on
+  Postgres/MySQL.** Branches on `s.driver()`: Postgres/MySQL use
+  `ADD COLUMN IF NOT EXISTS`, SQLite emits unconditional `ADD COLUMN`
+  (with documented caveat).
+- **Prelude exposes `IntoResponse`.** Handlers that build custom
+  `Json(body).into_response()` no longer need to pull `axum` as a
+  direct dep.
+- **Scaffold `Cargo.toml` ships sqlx with all three driver features**
+  (`postgres`, `sqlite`, `mysql`) — was Postgres-only even when the
+  default DB is SQLite.
+- **`db:wipe` works on all drivers.** New `MigrationRunner::wipe()`
+  factors the per-driver drop logic out of `fresh()`; the scaffolded
+  `run_db_wipe` calls it.
+- **`User` model uses `password` (not `password_hash`)** — Laravel
+  parity. Aligned across User struct, scaffold migration, seeder,
+  `make:auth` controller insert, auth migration, and docs. The field
+  is `#[serde(skip_serializing)]` so the hash never leaks via
+  accidental JSON serialization.
+
+Polish:
+
+- **`make:migration` mod names are clean.**
+  `pub mod create_posts_table;` instead of
+  `pub mod create_posts_table_20260520204804createpoststable`. Falls
+  back to a timestamp suffix only if the snake name actually collides.
+- **Noisy "non-Postgres default connection" log dropped to DEBUG** —
+  was logged twice per boot at INFO.
+- **Scaffold `.env.example` defaults `LOG_LEVEL` to a scoped filter**
+  (`debug,sqlx=warn,hyper=warn,tower_http=info`) so `anvil migrate`
+  output isn't buried under sqlx query DEBUG lines.
+- **Empty `crates/smith/templates/` directory removed** — it was a
+  misleading dead pointer (all scaffold templates are inline strings).
+- **README "Status" section** updated; was still saying "publish in
+  progress" even though `anvilforge-cli 0.3.2` was live.
+
+Defense-in-depth:
+
+- **`MigrationRunner` checks for duplicate `name()` returns at
+  construction.** Two migrations returning the same name (the
+  rename-file-forget-to-update-the-string footgun) panic with a
+  pointed message before any DB writes happen, instead of silently
+  shadowing one another.
+
+### `anvil self-update` (alias: `anvil update`)
+
+A one-shot updater for the CLI itself.
+
+- Queries `https://crates.io/api/v1/crates/anvilforge-cli` for the
+  latest stable version (or `--prerelease` for `-rc` / `-beta`).
+- Fetches `CHANGELOG.md` from GitHub raw and prints the section
+  between your installed version and the latest, so you see what
+  you're agreeing to before installing.
+- Auto-detects install path: probes `cargo binstall --version` and
+  uses the precompiled-binary path (~10s) when available; falls back
+  to `cargo install --locked --force` (compile from source) otherwise.
+  Override with `--method binstall|cargo`.
+- Pins `--version X.Y.Z` on both paths so a release dropping
+  mid-confirm doesn't change what gets installed.
+- Verifies post-install by re-running `anvil --version` and warns on
+  PATH shadowing.
+- `--check` prints what would happen without installing.
+- `--force` skips the confirmation prompt.
+
+### Dev-loop tightening
+
+- **Pre-push hook (`hooks/pre-push`).** Runs the exact same gate as
+  `.github/workflows/ci.yml` (cargo fmt --check, build --workspace,
+  clippy `-D warnings`, test --workspace) before letting a push reach
+  the network. One-time setup: `git config core.hooksPath hooks`.
+  Bypass with `ANVIL_SKIP_PREFLIGHT=1 git push` for emergencies.
+  Setup documented in `CONTRIBUTING.md`.
+
 ## [0.3.2] - 2026-05-20
 
 ### Laravel Herd integration + auto DB creation on `anvil new`

@@ -17,7 +17,8 @@ pub struct User {
     pub id: i64,
     pub name: String,
     pub email: String,
-    pub password_hash: String,
+    /// Argon2id hash. Named `password` to match Laravel's column convention.
+    pub password: String,
 }
 
 #[async_trait]
@@ -36,7 +37,7 @@ impl Authenticatable for User {
             .first(c.pool())
             .await?;
         Ok(user.map(|u| {
-            let hash = u.password_hash.clone();
+            let hash = u.password.clone();
             (u, hash)
         }))
     }
@@ -67,7 +68,7 @@ async fn logout(session: Session) -> Result<Redirect> {
 }
 ```
 
-- `auth::attempt::<User>` — looks up by email, verifies password against `password_hash`. Returns `None` if credentials are bad.
+- `auth::attempt::<User>` — looks up by email, verifies the form's plaintext `password` against the stored hash (the `password` column). Returns `None` if credentials are bad.
 - `auth::login(&session, &user)` — writes the user's id into the session under `_auth.user_id`.
 - `auth::logout(&session)` — clears it.
 

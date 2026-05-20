@@ -241,6 +241,25 @@ enum Commands {
         force: bool,
     },
 
+    /// Update the installed `anvil` binary to the latest crates.io release.
+    /// Uses `cargo binstall` for a precompiled binary when available, else
+    /// falls back to `cargo install` (compile from source).
+    #[command(name = "self-update", aliases = ["update"])]
+    SelfUpdate {
+        /// Check for a new version and print the changelog — don't install.
+        #[arg(long)]
+        check: bool,
+        /// Skip the confirmation prompt.
+        #[arg(long)]
+        force: bool,
+        /// Include pre-release versions (e.g. `0.4.0-rc1`).
+        #[arg(long)]
+        prerelease: bool,
+        /// Install method: `auto` (default), `cargo`, or `binstall`.
+        #[arg(long)]
+        method: Option<String>,
+    },
+
     /// Wire this project into Laravel Herd: creates an nginx proxy at
     /// `https://<name>.test` → 127.0.0.1:<port> and patches APP_URL / APP_ADDR
     /// in `.env`. Defaults to port 8081 because Herd's bundled Reverb service
@@ -436,6 +455,12 @@ fn main() -> Result<()> {
         Commands::Fmt { check } => commands::fmt::run(check),
         Commands::Lint { fix } => commands::lint::run(fix),
         Commands::Install { force } => commands::install::run(force),
+        Commands::SelfUpdate {
+            check,
+            force,
+            prerelease,
+            method,
+        } => commands::self_update::run(check, force, prerelease, method.as_deref()),
         Commands::HerdLink {
             domain,
             port,

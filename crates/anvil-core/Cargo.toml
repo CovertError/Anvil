@@ -79,3 +79,4 @@ embed-assets = ["dep:rust-embed"]
 
 [dev-dependencies]
 http-body-util = { workspace = true }
+tempfile = "3"

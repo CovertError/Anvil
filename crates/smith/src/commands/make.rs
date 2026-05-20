@@ -59,19 +59,28 @@ pub fn migration(name: &str) -> Result<()> {
     // Auto-append the `#[path = "..."] pub mod ...;` line to database/migrations/mod.rs.
     // Inventory auto-discovers from there. No manual `all()` Vec needed.
     let mod_rs = project_root().join("database/migrations/mod.rs");
-    let mod_name = snake_case(name);
-    let mod_line = format!(
-        "\n#[path = \"{file_name}\"]\npub mod {mod_name}_{ts_short};\n",
-        ts_short = stem.replace('_', "")
-    );
+    let snake = snake_case(name);
+    let mut mod_name = snake.clone();
+    let mut existing = if mod_rs.exists() {
+        std::fs::read_to_string(&mod_rs).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    // If the snake_case name already appears as a `pub mod <name>;`, fall back to
+    // the timestamp-suffixed form to avoid collisions. Running `make:migration` with
+    // the same name twice is the only realistic way to trigger this.
+    let collision_pat = format!("pub mod {snake};");
+    if existing.contains(&collision_pat) {
+        mod_name = format!("{snake}_{}", ts.to_string().replace('_', ""));
+    }
+    let mod_line = format!("\n#[path = \"{file_name}\"]\npub mod {mod_name};\n");
     if mod_rs.exists() {
-        let mut current = std::fs::read_to_string(&mod_rs).unwrap_or_default();
-        if !current.contains(&file_name) {
-            if !current.ends_with('\n') {
-                current.push('\n');
+        if !existing.contains(&file_name) {
+            if !existing.ends_with('\n') {
+                existing.push('\n');
             }
-            current.push_str(&mod_line);
-            std::fs::write(&mod_rs, current).context("append migration to mod.rs")?;
+            existing.push_str(&mod_line);
+            std::fs::write(&mod_rs, existing).context("append migration to mod.rs")?;
             println!("appended to database/migrations/mod.rs");
         }
     } else {
@@ -89,7 +98,8 @@ pub fn migration(name: &str) -> Result<()> {
 }
 
 pub fn controller(name: &str, resource: bool) -> Result<()> {
-    let path = project_root().join(format!("app/Http/Controllers/{name}.rs"));
+    let dir = "app/Http/Controllers";
+    let path = project_root().join(format!("{dir}/{name}.rs"));
     let tpl = if resource {
         RESOURCE_CONTROLLER_TEMPLATE
     } else {
@@ -106,32 +116,40 @@ pub fn controller(name: &str, resource: bool) -> Result<()> {
         }),
     )?;
     println!("created {}", path.display());
+    append_to_mod_rs(dir, name)?;
     Ok(())
 }
 
 pub fn request(name: &str) -> Result<()> {
-    let path = project_root().join(format!("app/Http/Requests/{name}.rs"));
+    let dir = "app/Http/Requests";
+    let path = project_root().join(format!("{dir}/{name}.rs"));
     write_template(&path, REQUEST_TEMPLATE, json!({ "name": name }))?;
     println!("created {}", path.display());
+    append_to_mod_rs(dir, name)?;
     Ok(())
 }
 
 pub fn job(name: &str) -> Result<()> {
-    let path = project_root().join(format!("app/Jobs/{name}.rs"));
+    let dir = "app/Jobs";
+    let path = project_root().join(format!("{dir}/{name}.rs"));
     write_template(&path, JOB_TEMPLATE, json!({ "name": name }))?;
     println!("created {}", path.display());
+    append_to_mod_rs(dir, name)?;
     Ok(())
 }
 
 pub fn event(name: &str) -> Result<()> {
-    let path = project_root().join(format!("app/Events/{name}.rs"));
+    let dir = "app/Events";
+    let path = project_root().join(format!("{dir}/{name}.rs"));
     write_template(&path, EVENT_TEMPLATE, json!({ "name": name }))?;
     println!("created {}", path.display());
+    append_to_mod_rs(dir, name)?;
     Ok(())
 }
 
 pub fn listener(name: &str, event: Option<&str>) -> Result<()> {
-    let path = project_root().join(format!("app/Listeners/{name}.rs"));
+    let dir = "app/Listeners";
+    let path = project_root().join(format!("{dir}/{name}.rs"));
     write_template(
         &path,
         LISTENER_TEMPLATE,
@@ -141,6 +159,7 @@ pub fn listener(name: &str, event: Option<&str>) -> Result<()> {
         }),
     )?;
     println!("created {}", path.display());
+    append_to_mod_rs(dir, name)?;
     Ok(())
 }
 
@@ -229,74 +248,105 @@ pub fn component(name: &str) -> Result<()> {
 }
 
 pub fn mail(name: &str) -> Result<()> {
-    let path = project_root().join(format!("app/Mail/{name}.rs"));
+    let dir = "app/Mail";
+    let path = project_root().join(format!("{dir}/{name}.rs"));
     write_template(&path, MAIL_TEMPLATE, json!({ "name": name }))?;
     println!("created {}", path.display());
+    append_to_mod_rs(dir, name)?;
     Ok(())
 }
 
 pub fn notification(name: &str) -> Result<()> {
-    let path = project_root().join(format!("app/Notifications/{name}.rs"));
+    let dir = "app/Notifications";
+    let path = project_root().join(format!("{dir}/{name}.rs"));
     write_template(&path, NOTIFICATION_TEMPLATE, json!({ "name": name }))?;
     println!("created {}", path.display());
+    append_to_mod_rs(dir, name)?;
     Ok(())
 }
 
 pub fn policy(name: &str, model: Option<&str>) -> Result<()> {
     // Infer model from policy name: PostPolicy → Post (default).
     let model_name = model.unwrap_or_else(|| name.strip_suffix("Policy").unwrap_or(name));
-    let path = project_root().join(format!("app/Policies/{name}.rs"));
+    let dir = "app/Policies";
+    let path = project_root().join(format!("{dir}/{name}.rs"));
     write_template(
         &path,
         POLICY_TEMPLATE,
         json!({ "name": name, "model": model_name }),
     )?;
     println!("created {}", path.display());
+    append_to_mod_rs(dir, name)?;
     Ok(())
 }
 
 pub fn rule(name: &str) -> Result<()> {
-    let path = project_root().join(format!("app/Rules/{name}.rs"));
+    let dir = "app/Rules";
+    let path = project_root().join(format!("{dir}/{name}.rs"));
     write_template(&path, RULE_TEMPLATE, json!({ "name": name }))?;
     println!("created {}", path.display());
+    append_to_mod_rs(dir, name)?;
     Ok(())
 }
 
 pub fn resource_serializer(name: &str) -> Result<()> {
     // Infer model from resource name: PostResource → Post (default).
     let model_name = name.strip_suffix("Resource").unwrap_or(name);
-    let path = project_root().join(format!("app/Http/Resources/{name}.rs"));
+    let dir = "app/Http/Resources";
+    let path = project_root().join(format!("{dir}/{name}.rs"));
     write_template(
         &path,
         RESOURCE_TEMPLATE,
         json!({ "name": name, "model": model_name }),
     )?;
     println!("created {}", path.display());
+    append_to_mod_rs(dir, name)?;
     Ok(())
 }
 
 pub fn factory(name: &str, model: Option<&str>) -> Result<()> {
     // Infer model from factory name: PostFactory → Post (default).
     let model_name = model.unwrap_or_else(|| name.strip_suffix("Factory").unwrap_or(name));
-    let path = project_root().join(format!("database/factories/{name}.rs"));
+    let dir = "database/factories";
+    let path = project_root().join(format!("{dir}/{name}.rs"));
     write_template(
         &path,
         FACTORY_TEMPLATE,
         json!({ "name": name, "model": model_name }),
     )?;
     println!("created {}", path.display());
-    println!();
-    println!("  to wire it up:");
-    println!("    1. In database/factories/mod.rs:");
-    println!(
-        "         #[path = \"{name}.rs\"] mod {factory_mod};",
-        factory_mod = snake_case(name)
-    );
-    println!(
-        "         pub use {factory_mod}::{name};",
-        factory_mod = snake_case(name)
-    );
-    println!();
+    append_to_mod_rs(dir, name)?;
+    Ok(())
+}
+
+/// Append `#[path = "<Name>.rs"] mod <snake>; pub use <snake>::<Name>;` to the
+/// `mod.rs` of `dir`. Idempotent: skips when the file is already referenced.
+/// Creates `mod.rs` if it doesn't exist (with a one-line header).
+fn append_to_mod_rs(dir: &str, name: &str) -> Result<()> {
+    let mod_rs = project_root().join(dir).join("mod.rs");
+    let snake = snake_case(name);
+    let line = format!("\n#[path = \"{name}.rs\"]\nmod {snake};\npub use {snake}::{name};\n");
+    let file_marker = format!("\"{name}.rs\"");
+
+    let mut current = if mod_rs.exists() {
+        std::fs::read_to_string(&mod_rs).unwrap_or_default()
+    } else {
+        if let Some(parent) = mod_rs.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+        String::new()
+    };
+
+    if current.contains(&file_marker) {
+        return Ok(());
+    }
+
+    if !current.is_empty() && !current.ends_with('\n') {
+        current.push('\n');
+    }
+    current.push_str(&line);
+    std::fs::write(&mod_rs, current).with_context(|| format!("append {name} to {}/mod.rs", dir))?;
+    println!("appended to {}/mod.rs", dir);
     Ok(())
 }
 
@@ -759,7 +809,7 @@ use crate::app::Models::{{model}};
 pub struct {{name}} {
     pub id: i64,
     // TODO: the fields you want to expose.
-    // Hide secrets (password_hash, internal flags) by simply not listing them.
+    // Hide secrets (password, internal flags) by simply not listing them.
 }
 
 impl From<{{model}}> for {{name}} {

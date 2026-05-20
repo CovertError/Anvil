@@ -13,8 +13,11 @@ mod routes;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    anvil_core::config::load_dotenv();
+    let env_path = anvil_core::config::load_dotenv();
     anvil_core::tracing_init::init();
+    if let Some(path) = env_path {
+        tracing::info!(path = %path.display(), "loaded .env");
+    }
 
     // Allow CLI-style dispatch via `cargo run -- migrate`, `cargo run -- serve`, etc.
     let args: Vec<String> = std::env::args().collect();

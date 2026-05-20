@@ -5,8 +5,11 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {
-//!     anvilforge::config::load_dotenv();
+//!     let env_path = anvilforge::config::load_dotenv();
 //!     anvilforge::tracing_init::init();
+//!     if let Some(p) = env_path {
+//!         tracing::info!(path = %p.display(), "loaded .env");
+//!     }
 //!
 //!     let app = Application::builder()
 //!         .web(|r| r.get("/", |_: State<Container>| async { "hello" }))
@@ -69,6 +72,7 @@ pub mod prelude {
     pub use cast::{Pool, Schema};
 
     pub use axum::extract::FromRequest;
+    pub use axum::response::IntoResponse;
     pub use chrono::{DateTime, Utc};
     pub use serde::{Deserialize, Serialize};
     pub use serde_json::{json as json_macro, Value as JsonValue};

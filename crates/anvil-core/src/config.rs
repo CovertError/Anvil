@@ -1,9 +1,44 @@
 //! Configuration loading. `.env` via dotenvy + typed config structs in `config/*.rs`.
 
 use std::env;
+use std::path::{Path, PathBuf};
 
-pub fn load_dotenv() {
-    let _ = dotenvy::dotenv();
+/// Load environment variables from the project's `.env` file.
+///
+/// Walks up from the current working directory looking for a project root
+/// marker (`config/anvil.toml`, then `Cargo.toml`) and loads `.env` from that
+/// directory only — it does NOT walk further up. This avoids accidentally
+/// picking up a parent project's `.env` when the Anvil project is nested
+/// inside another codebase (e.g., a Laravel root).
+///
+/// Returns the path of the `.env` that was loaded, or `None` if no project
+/// root or no `.env` was found. Callers can log this after `tracing_init`.
+pub fn load_dotenv() -> Option<PathBuf> {
+    let cwd = env::current_dir().ok()?;
+    let root = find_project_root(&cwd)?;
+    let env_path = root.join(".env");
+    if !env_path.exists() {
+        return None;
+    }
+    dotenvy::from_path(&env_path).ok()?;
+    Some(env_path)
+}
+
+/// Walk up from `start` looking for the first directory that contains
+/// either `config/anvil.toml` (preferred — Anvil project marker) or
+/// `Cargo.toml` (workspace root). Stops at the filesystem root if neither
+/// is found.
+fn find_project_root(start: &Path) -> Option<PathBuf> {
+    let mut dir = start;
+    loop {
+        if dir.join("config/anvil.toml").exists() {
+            return Some(dir.to_path_buf());
+        }
+        if dir.join("Cargo.toml").exists() {
+            return Some(dir.to_path_buf());
+        }
+        dir = dir.parent()?;
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -302,5 +337,61 @@ impl FilesystemConfig {
             local_root: env::var("FILESYSTEM_LOCAL_ROOT")
                 .unwrap_or_else(|_| "storage/app".to_string()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_project_root;
+    use std::fs;
+
+    #[test]
+    fn finds_root_via_anvil_marker() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("config")).unwrap();
+        fs::write(root.join("config/anvil.toml"), "").unwrap();
+        let nested = root.join("src/foo");
+        fs::create_dir_all(&nested).unwrap();
+        assert_eq!(find_project_root(&nested), Some(root.to_path_buf()));
+    }
+
+    #[test]
+    fn finds_root_via_cargo_toml() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::write(root.join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
+        let nested = root.join("a/b/c");
+        fs::create_dir_all(&nested).unwrap();
+        assert_eq!(find_project_root(&nested), Some(root.to_path_buf()));
+    }
+
+    #[test]
+    fn prefers_anvil_marker_over_outer_cargo_toml() {
+        // Anvil project nested inside a non-Anvil Cargo workspace — we want the
+        // Anvil project root, not the workspace root.
+        let tmp = tempfile::tempdir().unwrap();
+        let outer = tmp.path();
+        fs::write(outer.join("Cargo.toml"), "").unwrap();
+        let anvil = outer.join("apps/web");
+        fs::create_dir_all(anvil.join("config")).unwrap();
+        fs::write(anvil.join("config/anvil.toml"), "").unwrap();
+        fs::write(anvil.join("Cargo.toml"), "").unwrap();
+        let cwd = anvil.join("src");
+        fs::create_dir_all(&cwd).unwrap();
+        // From anvil/src we should hit anvil/ first (it has both markers).
+        assert_eq!(find_project_root(&cwd), Some(anvil.clone()));
+    }
+
+    #[test]
+    fn returns_none_outside_any_project() {
+        // tempdir() has no Cargo.toml or config/anvil.toml; nothing should match
+        // unless an ancestor does. We can't easily isolate ancestors, but we can
+        // at least confirm the function doesn't panic on a path with no markers
+        // at the starting level by walking from a non-existent ancestor.
+        let tmp = tempfile::tempdir().unwrap();
+        // Note: a parent of tmp may be a Cargo project (target/, etc.), so we
+        // can't assert None here. Instead just exercise the path.
+        let _ = find_project_root(tmp.path());
     }
 }

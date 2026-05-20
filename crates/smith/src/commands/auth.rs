@@ -6,43 +6,77 @@
 //! - `routes/auth.rs`
 //! - `resources/views/auth/login.forge.html` + `register.forge.html`
 //! - `database/migrations/<ts>_add_auth_columns_to_users.rs`
+//!
+//! All sibling `mod.rs` files are auto-updated. Route registration in
+//! `bootstrap/app.rs` is best-effort: we splice `.web(routes::auth::register)`
+//! into the existing `.web(...)` chain if we can find it; otherwise the user
+//! gets a single concrete instruction.
 
 use std::fs;
+use std::path::Path;
 
 use anyhow::{Context, Result};
 
 use super::project_root;
 
+const AUTH_MIGRATION_FILE: &str = "2026_01_01_000099_add_auth_columns_to_users.rs";
+const AUTH_MIGRATION_PATH: &str =
+    "database/migrations/2026_01_01_000099_add_auth_columns_to_users.rs";
+const AUTH_MIGRATION_STEM: &str = "2026_01_01_000099_add_auth_columns_to_users";
+const AUTH_MIGRATION_MOD: &str = "add_auth_columns_to_users";
+
 pub fn scaffold() -> Result<()> {
     let root = project_root();
 
-    let files = [
+    let files: [(&str, &str); 7] = [
         ("app/Http/Controllers/AuthController.rs", AUTH_CONTROLLER),
         ("app/Http/Requests/LoginRequest.rs", LOGIN_REQUEST),
         ("app/Http/Requests/RegisterRequest.rs", REGISTER_REQUEST),
         ("routes/auth.rs", AUTH_ROUTES),
         ("resources/views/auth/login.forge.html", LOGIN_VIEW),
         ("resources/views/auth/register.forge.html", REGISTER_VIEW),
-        (
-            "database/migrations/2026_01_01_000099_add_auth_columns_to_users.rs",
-            AUTH_MIGRATION,
-        ),
+        (AUTH_MIGRATION_PATH, AUTH_MIGRATION),
     ];
 
     let mut written = Vec::new();
     let mut skipped = Vec::new();
-    for (rel, contents) in files {
+    for (rel, contents) in &files {
         let path = root.join(rel);
         if path.exists() {
-            skipped.push(rel);
+            skipped.push(*rel);
             continue;
         }
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).ok();
         }
         fs::write(&path, contents).with_context(|| format!("writing {}", path.display()))?;
-        written.push(rel);
+        written.push(*rel);
     }
+
+    // Auto-wire mod.rs files + bootstrap + routes.
+    let mut wired = Vec::new();
+    let mut wiring_notes = Vec::new();
+    wire_mod_use(
+        &root,
+        "app/Http/Controllers/mod.rs",
+        "AuthController",
+        &mut wired,
+    )?;
+    wire_mod_use(
+        &root,
+        "app/Http/Requests/mod.rs",
+        "LoginRequest",
+        &mut wired,
+    )?;
+    wire_mod_use(
+        &root,
+        "app/Http/Requests/mod.rs",
+        "RegisterRequest",
+        &mut wired,
+    )?;
+    wire_routes_mod(&root, &mut wired, &mut wiring_notes)?;
+    wire_migrations_mod(&root, &mut wired)?;
+    wire_bootstrap_routes(&root, &mut wired, &mut wiring_notes)?;
 
     println!();
     println!("  ✓ scaffolded auth");
@@ -57,27 +91,155 @@ pub fn scaffold() -> Result<()> {
             println!("    - {s}");
         }
     }
+    if !wired.is_empty() {
+        println!();
+        println!("  wired:");
+        for w in &wired {
+            println!("    ~ {w}");
+        }
+    }
+    if !wiring_notes.is_empty() {
+        println!();
+        println!("  manual follow-ups:");
+        for n in &wiring_notes {
+            println!("    ! {n}");
+        }
+    }
     println!();
-    println!("  manual wiring (until v0.2 auto-registers):");
-    println!("    1. In app/Http/Controllers/mod.rs, add:");
-    println!("         #[path = \"AuthController.rs\"] mod auth_controller;");
-    println!("         pub use auth_controller::AuthController;");
-    println!("    2. In app/Http/Requests/mod.rs, add:");
-    println!("         #[path = \"LoginRequest.rs\"] mod login_request;");
-    println!("         #[path = \"RegisterRequest.rs\"] mod register_request;");
-    println!("         pub use login_request::LoginRequest;");
-    println!("         pub use register_request::RegisterRequest;");
-    println!("    3. In routes/mod.rs, add `pub mod auth;`");
-    println!("    4. In bootstrap/app.rs, merge routes::auth::register into .web(...)");
-    println!("    5. In database/migrations/mod.rs:");
-    println!("         #[path = \"2026_01_01_000099_add_auth_columns_to_users.rs\"]");
-    println!("         pub mod add_auth_columns;");
-    println!(
-        "         // then add `Box::new(add_auth_columns::AddAuthColumnsToUsersTable)` to all()"
-    );
-    println!("    6. smith migrate");
+    println!("  next:");
+    println!("    smith migrate");
     println!();
     Ok(())
+}
+
+/// Append `#[path = "<Name>.rs"] mod <snake>; pub use <snake>::<Name>;` to `mod.rs` if absent.
+fn wire_mod_use(root: &Path, rel_mod_rs: &str, name: &str, wired: &mut Vec<String>) -> Result<()> {
+    let mod_rs = root.join(rel_mod_rs);
+    let snake = to_snake(name);
+    let marker = format!("\"{name}.rs\"");
+    let mut current = if mod_rs.exists() {
+        fs::read_to_string(&mod_rs).unwrap_or_default()
+    } else {
+        if let Some(parent) = mod_rs.parent() {
+            fs::create_dir_all(parent).ok();
+        }
+        String::new()
+    };
+    if current.contains(&marker) {
+        return Ok(());
+    }
+    if !current.is_empty() && !current.ends_with('\n') {
+        current.push('\n');
+    }
+    current.push_str(&format!(
+        "\n#[path = \"{name}.rs\"]\nmod {snake};\npub use {snake}::{name};\n"
+    ));
+    fs::write(&mod_rs, current).with_context(|| format!("write {}", mod_rs.display()))?;
+    wired.push(format!("{rel_mod_rs} (+{name})"));
+    Ok(())
+}
+
+fn wire_routes_mod(root: &Path, wired: &mut Vec<String>, notes: &mut Vec<String>) -> Result<()> {
+    let mod_rs = root.join("routes/mod.rs");
+    if !mod_rs.exists() {
+        notes.push("routes/mod.rs not found — add `pub mod auth;` by hand".to_string());
+        return Ok(());
+    }
+    let mut current = fs::read_to_string(&mod_rs).unwrap_or_default();
+    if current.contains("pub mod auth") || current.contains("mod auth ") {
+        return Ok(());
+    }
+    if !current.ends_with('\n') {
+        current.push('\n');
+    }
+    current.push_str("pub mod auth;\n");
+    fs::write(&mod_rs, current)?;
+    wired.push("routes/mod.rs (+pub mod auth)".to_string());
+    Ok(())
+}
+
+fn wire_migrations_mod(root: &Path, wired: &mut Vec<String>) -> Result<()> {
+    let mod_rs = root.join("database/migrations/mod.rs");
+    let marker = format!("\"{AUTH_MIGRATION_FILE}\"");
+    let mut current = if mod_rs.exists() {
+        fs::read_to_string(&mod_rs).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    if current.contains(&marker) {
+        return Ok(());
+    }
+    if !current.is_empty() && !current.ends_with('\n') {
+        current.push('\n');
+    }
+    current.push_str(&format!(
+        "\n#[path = \"{AUTH_MIGRATION_FILE}\"]\npub mod {AUTH_MIGRATION_MOD};\n"
+    ));
+    fs::write(&mod_rs, current)?;
+    wired.push(format!(
+        "database/migrations/mod.rs (+{AUTH_MIGRATION_STEM})"
+    ));
+    Ok(())
+}
+
+/// Best-effort: insert `.web(routes::auth::register)` into the `.web(...)` chain
+/// in `bootstrap/app.rs`. If we can't locate the chain we leave a note instead.
+fn wire_bootstrap_routes(
+    root: &Path,
+    wired: &mut Vec<String>,
+    notes: &mut Vec<String>,
+) -> Result<()> {
+    let path = root.join("bootstrap/app.rs");
+    if !path.exists() {
+        notes.push(
+            "bootstrap/app.rs not found — register routes::auth::register manually".to_string(),
+        );
+        return Ok(());
+    }
+    let current = fs::read_to_string(&path).unwrap_or_default();
+    if current.contains("routes::auth::register") || current.contains("routes::auth(") {
+        return Ok(());
+    }
+
+    // Splice in a `.web(routes::auth::register)` right after `.web(routes::web::register)`
+    // or `.web(routes::web)`. If we can't find either, leave a note.
+    let anchors = [
+        ".web(routes::web::register)",
+        ".web(routes::web)",
+        ".web(crate::routes::web::register)",
+    ];
+    let mut updated = current.clone();
+    let mut found = false;
+    for anchor in anchors {
+        if let Some(idx) = updated.find(anchor) {
+            let insert_at = idx + anchor.len();
+            let inject = "\n        .web(routes::auth::register)";
+            updated.insert_str(insert_at, inject);
+            found = true;
+            break;
+        }
+    }
+    if found {
+        fs::write(&path, updated)?;
+        wired.push("bootstrap/app.rs (+.web(routes::auth::register))".to_string());
+    } else {
+        notes.push(
+            "bootstrap/app.rs: couldn't find a `.web(...)` chain — add `.web(routes::auth::register)` to your builder manually"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn to_snake(name: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in name.chars().enumerate() {
+        if c.is_uppercase() && i > 0 {
+            out.push('_');
+        }
+        out.push(c.to_ascii_lowercase());
+    }
+    out
 }
 
 const AUTH_CONTROLLER: &str = r##"//! Auth controllers — login, register, logout.
@@ -142,13 +304,13 @@ impl AuthController {
         session: Session,
         payload: RegisterRequest,
     ) -> Result<Redirect> {
-        let password_hash = auth::hash_password(&payload.password)?;
+        let hashed = auth::hash_password(&payload.password)?;
         let row: (i64,) = sqlx::query_as(
-            "INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id",
+            "INSERT INTO users (name, email, password) VALUES ($1, $2, $3) RETURNING id",
         )
         .bind(&payload.name)
         .bind(&payload.email)
-        .bind(&password_hash)
+        .bind(&hashed)
         .fetch_one(c.pool())
         .await
         .map_err(Error::Database)?;
@@ -255,10 +417,15 @@ const REGISTER_VIEW: &str = r#"@extends("layouts.app")
 @endsection
 "#;
 
-const AUTH_MIGRATION: &str = r#"//! Add auth columns to the users table. No-op if columns already exist.
+const AUTH_MIGRATION: &str = r#"//! Add auth columns to the users table.
+//!
+//! Idempotent on Postgres/MySQL via `ADD COLUMN IF NOT EXISTS`. SQLite has no
+//! IF-NOT-EXISTS form for ALTER, so on SQLite this migration assumes the
+//! columns are absent; if you already added them by hand, edit this file or
+//! delete it before running `migrate`.
 
 use anvilforge::prelude::*;
-use anvilforge::cast::Schema;
+use anvilforge::cast::{Driver, Schema};
 
 pub struct AddAuthColumnsToUsersTable;
 
@@ -268,13 +435,32 @@ impl CastMigration for AddAuthColumnsToUsersTable {
     }
 
     fn up(&self, s: &mut Schema) {
-        s.raw("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255) NOT NULL DEFAULT ''");
-        s.raw("ALTER TABLE users ADD COLUMN IF NOT EXISTS remember_token VARCHAR(100)");
+        match s.driver() {
+            Driver::Sqlite => {
+                s.raw("ALTER TABLE users ADD COLUMN password TEXT NOT NULL DEFAULT ''");
+                s.raw("ALTER TABLE users ADD COLUMN remember_token TEXT");
+            }
+            _ => {
+                s.raw("ALTER TABLE users ADD COLUMN IF NOT EXISTS password VARCHAR(255) NOT NULL DEFAULT ''");
+                s.raw("ALTER TABLE users ADD COLUMN IF NOT EXISTS remember_token VARCHAR(100)");
+            }
+        }
     }
 
     fn down(&self, s: &mut Schema) {
-        s.raw("ALTER TABLE users DROP COLUMN IF EXISTS password_hash");
-        s.raw("ALTER TABLE users DROP COLUMN IF EXISTS remember_token");
+        match s.driver() {
+            Driver::Sqlite => {
+                // SQLite doesn't support `DROP COLUMN IF EXISTS`. Either of these
+                // raw statements will error if the column is already missing —
+                // that's tolerable for a rollback.
+                s.raw("ALTER TABLE users DROP COLUMN password");
+                s.raw("ALTER TABLE users DROP COLUMN remember_token");
+            }
+            _ => {
+                s.raw("ALTER TABLE users DROP COLUMN IF EXISTS password");
+                s.raw("ALTER TABLE users DROP COLUMN IF EXISTS remember_token");
+            }
+        }
     }
 }
 "#;

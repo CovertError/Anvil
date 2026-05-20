@@ -27,6 +27,29 @@ pub fn collected() -> Vec<Box<dyn Migration>> {
         .collect()
 }
 
+/// Panic with a clear message if two registered migrations return the same
+/// `name()`. The migrations table has a UNIQUE constraint on `name`, but a
+/// duplicate registration silently masks the second migration at apply time —
+/// failing early at runner construction catches the rename footgun (file
+/// renamed, `name()` left stale → collision with the new file's `name()`).
+fn check_unique_names(migrations: &[Box<dyn Migration>]) {
+    use std::collections::HashSet;
+    let mut seen: HashSet<&'static str> = HashSet::with_capacity(migrations.len());
+    let mut dups: Vec<&'static str> = Vec::new();
+    for m in migrations {
+        if !seen.insert(m.name()) {
+            dups.push(m.name());
+        }
+    }
+    if !dups.is_empty() {
+        panic!(
+            "duplicate Migration::name() values: {dups:?}. \
+             A `name()` collision lets one migration silently shadow another. \
+             Check that each migration file's `fn name(&self) -> &'static str` matches its filename stem."
+        );
+    }
+}
+
 /// Closure-style migration — Laravel's
 /// `Schema::create('posts', function (Blueprint $t) { ... })` ported to Rust.
 ///
@@ -99,11 +122,13 @@ pub struct MigrationRunner {
 impl MigrationRunner {
     pub fn new(pool: Pool) -> Self {
         let mut migrations = collected();
+        check_unique_names(&migrations);
         migrations.sort_by_key(|m| m.name().to_string());
         Self { pool, migrations }
     }
 
     pub fn with_migrations(pool: Pool, mut migrations: Vec<Box<dyn Migration>>) -> Self {
+        check_unique_names(&migrations);
         migrations.sort_by_key(|m| m.name().to_string());
         Self { pool, migrations }
     }
@@ -372,9 +397,18 @@ impl MigrationRunner {
     }
 
     pub async fn fresh(&self) -> Result<(), Error> {
-        // Wipe schema. MySQL doesn't have a "DROP SCHEMA public" equivalent in the
-        // user-friendly sense (it's tied to the active database), so we enumerate
-        // and drop tables individually for it.
+        self.wipe().await?;
+        self.run_up().await?;
+        Ok(())
+    }
+
+    /// Drop every table in the current schema, regardless of driver. Doesn't
+    /// re-run migrations — use `fresh()` for that.
+    ///
+    /// - Postgres: `DROP SCHEMA public CASCADE; CREATE SCHEMA public`.
+    /// - MySQL: enumerate user tables and drop each (with `FOREIGN_KEY_CHECKS=0`).
+    /// - SQLite: enumerate user tables in `sqlite_master` and drop each.
+    pub async fn wipe(&self) -> Result<(), Error> {
         match self.driver() {
             Driver::Postgres => {
                 for s in self.fresh_ddl() {
@@ -388,7 +422,6 @@ impl MigrationRunner {
                 self.drop_all_sqlite_tables().await?;
             }
         }
-        self.run_up().await?;
         Ok(())
     }
 
@@ -570,5 +603,34 @@ mod macro_tests {
             !s_down.statements.is_empty(),
             "down() should emit at least one DDL statement"
         );
+    }
+
+    struct NamedMigration(&'static str);
+    impl Migration for NamedMigration {
+        fn name(&self) -> &'static str {
+            self.0
+        }
+        fn up(&self, _: &mut Schema) {}
+        fn down(&self, _: &mut Schema) {}
+    }
+
+    #[test]
+    fn check_unique_names_accepts_unique() {
+        let migs: Vec<Box<dyn Migration>> = vec![
+            Box::new(NamedMigration("2026_01_01_000001_a")),
+            Box::new(NamedMigration("2026_01_01_000002_b")),
+            Box::new(NamedMigration("2026_01_01_000003_c")),
+        ];
+        check_unique_names(&migs);
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate Migration::name() values")]
+    fn check_unique_names_panics_on_collision() {
+        let migs: Vec<Box<dyn Migration>> = vec![
+            Box::new(NamedMigration("2026_01_01_000001_a")),
+            Box::new(NamedMigration("2026_01_01_000001_a")),
+        ];
+        check_unique_names(&migs);
     }
 }
