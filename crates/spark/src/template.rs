@@ -2,10 +2,15 @@
 //!
 //! Pipeline: read `.forge.html` → forge-codegen lowering → MiniJinja runtime render.
 //!
-//! Templates are loaded from the configured views root (default
-//! `resources/views/`) and cached after first render. Set `SPARK_VIEWS_DIR` to
-//! override (useful for tests and integration apps with non-standard layouts).
-//! Set `SPARK_TEMPLATE_RELOAD=true` to disable caching during development.
+//! Templates resolve in this order:
+//!   1. Compile-time embedded source registered via `inventory` (see
+//!      `EmbeddedTemplate`). This is how single-binary distributions ship
+//!      templates without a `resources/views/` folder on disk.
+//!   2. Disk read from the configured views root (default `resources/views/`).
+//!
+//! Set `SPARK_VIEWS_DIR` to override the disk root (useful for tests and
+//! integration apps with non-standard layouts). Set `SPARK_TEMPLATE_RELOAD=true`
+//! to disable caching during development.
 
 use std::path::{Path, PathBuf};
 
@@ -14,6 +19,24 @@ use parking_lot::RwLock;
 use std::collections::HashMap;
 
 use crate::error::{Error, Result};
+
+/// Compile-time-embedded template, registered via `inventory::submit!` from
+/// a generated file in the user's `OUT_DIR`. `view_path` matches what
+/// `spark::template::render` is called with (e.g. `"spark/counter"`); `source`
+/// is the raw `.forge.html` content — lowering still happens at runtime so the
+/// pipeline is identical to the disk-loaded path.
+pub struct EmbeddedTemplate {
+    pub view_path: &'static str,
+    pub source: &'static str,
+}
+inventory::collect!(EmbeddedTemplate);
+
+fn embedded_source(view_path: &str) -> Option<&'static str> {
+    inventory::iter::<EmbeddedTemplate>
+        .into_iter()
+        .find(|t| t.view_path == view_path)
+        .map(|t| t.source)
+}
 
 static CACHE: Lazy<RwLock<HashMap<String, String>>> = Lazy::new(|| RwLock::new(HashMap::new()));
 
@@ -53,13 +76,17 @@ fn load_and_lower(view_path: &str) -> Result<String> {
             return Ok(cached.clone());
         }
     }
-    let path = template_path(view_path);
-    let raw = std::fs::read_to_string(&path).map_err(|e| {
-        Error::Template(format!(
-            "failed to read template {}: {e}",
-            display_path(&path)
-        ))
-    })?;
+    let raw: String = if let Some(embedded) = embedded_source(view_path) {
+        embedded.to_string()
+    } else {
+        let path = template_path(view_path);
+        std::fs::read_to_string(&path).map_err(|e| {
+            Error::Template(format!(
+                "failed to read template {}: {e}",
+                display_path(&path)
+            ))
+        })?
+    };
     // Runtime lowering: spark/sparkScripts directives emit MiniJinja-compatible
     // function calls (spark_mount / spark_scripts) instead of Askama-flavored
     // Rust paths. Functions are registered on the Environment in `render`.

@@ -6,7 +6,10 @@
 
 - [Install](getting-started/install.md)
 - [Your first app](getting-started/first-app.md)
+- [Build your first feature](getting-started/first-feature.md)
 - [Project structure](getting-started/structure.md)
+- [Coming from Laravel](getting-started/from-laravel.md)
+- [Tuning the dev loop](getting-started/dev-loop.md)
 
 # The basics
 
@@ -33,6 +36,7 @@
 
 # Subsystems
 
+- [Spark — reactive components](subsystems/spark.md)
 - [Queues](subsystems/queues.md)
 - [Mail & notifications](subsystems/mail.md)
 - [Cache](subsystems/cache.md)
@@ -49,6 +53,7 @@
 - [Configuration & .env](production/config.md)
 - [Deploying](production/deploy.md)
 - [Observability](production/observability.md)
+- [Benchmarks & methodology](production/benchmarks.md)
 
 ---
 

@@ -19,6 +19,11 @@
 pub use cast_core::*;
 pub use cast_derive::Model;
 
+// `#[macro_export]` macros land at the defining crate's root, not in the
+// module tree that `cast_core::*` re-exports — so they need explicit re-export
+// for `cast::migration!` / `anvilforge::migration!` to resolve.
+pub use cast_core::migration;
+
 // Re-export sqlx and sea-query so downstream crates can rely on Cast's pinned versions.
 pub use sea_query;
 pub use sqlx;

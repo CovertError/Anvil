@@ -33,3 +33,10 @@ chrono = { workspace = true }
 uuid = { workspace = true }
 async-trait = { workspace = true }
 sqlx = { workspace = true }
+
+[features]
+default = []
+# Propagates the framework-side embed feature: when enabled, apps can register
+# a `rust_embed::RustEmbed` impl as the source for a static-file mount, baking
+# `public/` into the binary at compile time. See `anvilforge::embed_static!`.
+embed-assets = ["anvilforge-core/embed-assets"]

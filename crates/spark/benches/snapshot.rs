@@ -21,6 +21,7 @@ fn sample_memo() -> Memo {
         view: "spark/counter".into(),
         listeners: vec!["posts.created".into()],
         errors: None,
+        rev: 0,
     }
 }
 

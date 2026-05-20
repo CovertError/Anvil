@@ -74,6 +74,7 @@ fn mount_then_dispatch_then_reencode() {
         view: entry.view.to_string(),
         listeners: Vec::new(),
         errors: None,
+        rev: 0,
     };
     let envelope = snapshot::Envelope::build(TEST_KEY, after.clone(), memo.clone());
     let wire = snapshot::encode(&envelope, TEST_KEY, false).unwrap();

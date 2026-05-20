@@ -54,6 +54,14 @@ pub struct ServerConfig {
     #[serde(default)]
     pub trusted_proxies: TrustedProxiesConfig,
 
+    /// Per-route timeout overrides. Each entry matches by path prefix and
+    /// applies its own timeout to requests under that prefix, overriding
+    /// `limits.request_timeout`. First matching prefix wins. Useful for
+    /// slow endpoints (large uploads, long polls) that don't want the
+    /// global timeout raised.
+    #[serde(default, rename = "route_timeout")]
+    pub route_timeouts: Vec<RouteTimeoutRule>,
+
     /// Access log config.
     #[serde(default)]
     pub access_log: AccessLogConfig,
@@ -93,6 +101,83 @@ fn default_bind() -> String {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TlsConfig {
+    pub cert: PathBuf,
+    pub key: PathBuf,
+
+    /// Optional ACME (Let's Encrypt) auto-cert. When present and the
+    /// framework was built with `--features acme`, the server obtains and
+    /// rotates certs in-process via TLS-ALPN-01 — `cert`/`key` above act
+    /// as the cache locations rather than pre-existing files.
+    #[serde(default)]
+    pub acme: Option<AcmeConfig>,
+
+    /// Additional `(server_name, cert, key)` triples for SNI-based cert
+    /// selection. The top-level `cert`/`key` above acts as the default
+    /// when no SNI hostname matches an entry here. Empty list = single-cert
+    /// behaviour (backward compatible).
+    ///
+    /// Example TOML:
+    ///
+    /// ```toml
+    /// [tls]
+    /// cert = "/etc/letsencrypt/live/example.com/fullchain.pem"
+    /// key  = "/etc/letsencrypt/live/example.com/privkey.pem"
+    ///
+    /// [[tls.certs]]
+    /// server_name = "api.example.com"
+    /// cert        = "/etc/letsencrypt/live/api.example.com/fullchain.pem"
+    /// key         = "/etc/letsencrypt/live/api.example.com/privkey.pem"
+    ///
+    /// [[tls.certs]]
+    /// server_name = "admin.example.com"
+    /// cert        = "/etc/letsencrypt/live/admin.example.com/fullchain.pem"
+    /// key         = "/etc/letsencrypt/live/admin.example.com/privkey.pem"
+    /// ```
+    #[serde(default, rename = "certs")]
+    pub additional_certs: Vec<SniCertEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AcmeConfig {
+    /// Domains to request certs for. The first is the primary SAN; the
+    /// rest are added as alternative names on the same cert.
+    pub domains: Vec<String>,
+
+    /// Contact email passed to the ACME directory (Let's Encrypt sends
+    /// expiry notices here). Optional but strongly recommended.
+    #[serde(default)]
+    pub contact: Option<String>,
+
+    /// On-disk cache directory for issued certs + the ACME account key.
+    /// Avoids hammering Let's Encrypt's rate limits on restart. Default
+    /// `./database/acme-cache` — created on first run.
+    #[serde(default = "default_acme_cache")]
+    pub cache_dir: PathBuf,
+
+    /// ACME directory URL. Default = Let's Encrypt production. Override
+    /// with `https://acme-staging-v02.api.letsencrypt.org/directory` for
+    /// staging while wiring this up — production has aggressive rate
+    /// limits on certificate issuance.
+    #[serde(default = "default_acme_directory")]
+    pub directory: String,
+}
+
+fn default_acme_cache() -> PathBuf {
+    PathBuf::from("./database/acme-cache")
+}
+
+fn default_acme_directory() -> String {
+    "https://acme-v02.api.letsencrypt.org/directory".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SniCertEntry {
+    /// Hostname this cert should be served for. Wildcards work the
+    /// same as `server_name` matching: `*.example.com` matches any
+    /// subdomain but not the apex.
+    pub server_name: String,
     pub cert: PathBuf,
     pub key: PathBuf,
 }
@@ -135,6 +220,26 @@ pub struct LimitsConfig {
     /// Per-request timeout for the handler. `None` = no timeout.
     #[serde(deserialize_with = "deserialize_opt_duration", default)]
     pub request_timeout: Option<Duration>,
+
+    /// Graceful shutdown timeout — on `SIGTERM` the server stops accepting
+    /// new connections, then waits up to this long for in-flight requests
+    /// to complete before dropping them. Default 10s matches SystemD's
+    /// typical drain window. Raise for long-poll / large-upload workloads,
+    /// lower for fast-iteration deploys.
+    #[serde(deserialize_with = "deserialize_duration", default = "default_drain_timeout")]
+    pub drain_timeout: Duration,
+
+    /// Maximum concurrent in-flight requests across the whole server.
+    /// `None` = unlimited (Tokio's default). When set, requests above the
+    /// cap immediately return HTTP 503 instead of queueing — this protects
+    /// against thundering-herd overload and lets a load balancer steer
+    /// traffic to healthy peers.
+    ///
+    /// Set in `config/anvil.toml` as `[limits] max_concurrency = 500`.
+    /// Pick a value that matches the size of your DB pool × expected
+    /// per-request DB ops; over-provisioning here just shifts the
+    /// bottleneck elsewhere.
+    pub max_concurrency: Option<u32>,
 }
 
 impl Default for LimitsConfig {
@@ -142,8 +247,14 @@ impl Default for LimitsConfig {
         Self {
             body_max: default_body_max(),
             request_timeout: None,
+            drain_timeout: default_drain_timeout(),
+            max_concurrency: None,
         }
     }
+}
+
+fn default_drain_timeout() -> Duration {
+    Duration::from_secs(10)
 }
 
 fn default_body_max() -> u64 {
@@ -216,6 +327,18 @@ pub struct RateLimitConfig {
 pub struct TrustedProxiesConfig {
     /// CIDR ranges from which X-Forwarded-* headers will be honored.
     pub ranges: Vec<ipnet::IpNet>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouteTimeoutRule {
+    /// URL path prefix this rule matches against. E.g. `/api/v2/uploads`.
+    pub prefix: String,
+
+    /// Timeout applied to matching requests. Accepts `"30s"`, `"2m"`,
+    /// `"500ms"`, or a bare integer (seconds).
+    #[serde(deserialize_with = "deserialize_duration")]
+    pub timeout: Duration,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -409,6 +532,8 @@ impl ServerConfig {
             self.tls = Some(TlsConfig {
                 cert: PathBuf::from(cert),
                 key: PathBuf::from(key),
+                acme: None,
+                additional_certs: Vec::new(),
             });
         }
         self
@@ -425,6 +550,18 @@ fn deserialize_size<'de, D: Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
         toml::Value::String(s) => parse_size(&s).map_err(D::Error::custom),
         other => Err(D::Error::custom(format!(
             "expected integer or size string, got {other:?}"
+        ))),
+    }
+}
+
+fn deserialize_duration<'de, D: Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {
+    use serde::de::Error;
+    let v = toml::Value::deserialize(d)?;
+    match v {
+        toml::Value::Integer(n) => Ok(Duration::from_secs(n.max(0) as u64)),
+        toml::Value::String(s) => parse_duration(&s).map_err(D::Error::custom),
+        other => Err(D::Error::custom(format!(
+            "expected integer (seconds) or duration string, got {other:?}"
         ))),
     }
 }

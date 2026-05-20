@@ -57,7 +57,9 @@ async fn list_posts(State(c): State<Container>) -> Result<ViewResponse> {
 }
 
 async fn show_post(State(c): State<Container>, Path(id): Path<i64>) -> Result<ViewResponse> {
-    let post = Post::find(c.pool(), id).await?.ok_or(Error::NotFound)?;
+    // `find_or_fail` is the Eloquent-shaped helper — returns
+    // `cast::Error::NotFound` which auto-maps to HTTP 404.
+    let post = Post::find_or_fail(c.pool(), id).await?;
     let html = format!(
         "<h1>{}</h1><div>{}</div>",
         html_escape(&post.title),

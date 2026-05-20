@@ -25,6 +25,7 @@ tower-sessions = { workspace = true }
 hyper = { workspace = true }
 http = { workspace = true }
 rustls-pemfile = { workspace = true }
+rustls = { workspace = true }
 reqwest = { workspace = true }
 toml = { workspace = true }
 ipnet = { workspace = true }
@@ -65,3 +66,16 @@ indexmap = { workspace = true }
 anvilforge-templates = { workspace = true }
 anvilforge-cast-core = { workspace = true }
 askama = { workspace = true }
+mime_guess = { workspace = true }
+notify = { workspace = true }
+rust-embed = { workspace = true, optional = true }
+
+[features]
+default = []
+# When enabled, scaffolded apps can register a `rust_embed::RustEmbed` impl as
+# the source for a static-file mount via `server::register_embedded_assets`,
+# baking `public/` into the binary at compile time instead of shipping a folder.
+embed-assets = ["dep:rust-embed"]
+
+[dev-dependencies]
+http-body-util = { workspace = true }

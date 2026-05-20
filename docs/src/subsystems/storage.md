@@ -1,6 +1,6 @@
 # Storage
 
-Storage wraps [`object_store`](https://docs.rs/object_store), giving you a unified API over local, S3, and GCS:
+Anvilforge's storage layer is Laravel's `Storage` facade in Rust — `put`, `get`, `delete`, `url`, multi-disk config. Implemented over [`object_store`](https://docs.rs/object_store), giving you a unified API across local, S3, and GCS without code changes (`FILESYSTEM_DISK` in `.env`):
 
 ```rust
 use bytes::Bytes;

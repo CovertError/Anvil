@@ -60,4 +60,63 @@ Resolve in handlers:
 let payments = container.resolve::<PaymentsConfig>().unwrap();
 ```
 
+## HTTP server config (`config/anvil.toml`)
+
+Separate from `.env` — `config/anvil.toml` holds the production HTTP
+serving knobs (bind address, TLS, timeouts, compression, rate limits,
+static-file mounts, reverse-proxy rules). See
+[Deploying](deploy.md) for the embedded-vs-upstream-proxy decision
+and the full schema. A few of the items most commonly tuned in
+production:
+
+### Body and request timeouts
+
+```toml
+[limits]
+body_max        = "10MB"   # max request body — applies to every route
+request_timeout = "30s"    # global handler timeout — None = no limit
+drain_timeout   = "30s"    # graceful shutdown window on SIGTERM (default: 10s)
+```
+
+### Per-route timeout overrides
+
+Slow endpoints (large uploads, long polls, server-sent events) usually
+need a longer window than the global `request_timeout`. Configure them
+per path prefix with `[[route_timeout]]`:
+
+```toml
+[[route_timeout]]
+prefix  = "/api/uploads"
+timeout = "5m"
+
+[[route_timeout]]
+prefix  = "/sse/feed"
+timeout = "1h"
+```
+
+- First-matching prefix wins.
+- Rules are applied *before* the global `[limits] request_timeout`, so a
+  per-route entry effectively overrides it for matching paths.
+- A request whose path matches no rule falls through to the global
+  timeout (if any).
+- Matching is a plain string `starts_with` — for `/api/uploads`, both
+  `/api/uploads` and `/api/uploads/123/chunks` match.
+
+### Trusted proxies
+
+When Anvilforge sits behind a load balancer or reverse proxy, configure
+the trusted CIDRs so rate-limit and access-log decisions use the real
+client IP from `X-Forwarded-For` instead of the proxy's IP. XFF from
+*untrusted* peers is always ignored — there's no way to spoof your
+upstream IP into the rate-limit bucket from a direct connection.
+
+```toml
+[trusted_proxies]
+ranges = ["10.0.0.0/8", "172.16.0.0/12"]
+```
+
+Leaving `ranges` empty (the default) disables XFF entirely and uses the
+direct TCP peer everywhere — the safe choice when no LB is in front of
+the process.
+
 [Next: deploying →](deploy.md)

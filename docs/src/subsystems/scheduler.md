@@ -1,6 +1,6 @@
 # Scheduler
 
-Define scheduled tasks in `src/app/schedule.rs`. They run when you invoke `smith schedule:run` — wire that into system cron once a minute:
+Same shape as Laravel's `app/Console/Kernel.php` `schedule()` method — a fluent Rust builder over cron expressions. Define scheduled tasks in `src/app/schedule.rs`; they run when you invoke `anvil schedule:run`, which is what you wire into system cron once a minute:
 
 ```cron
 * * * * * cd /var/www/myapp && smith schedule:run >> /var/log/anvilforge.log 2>&1

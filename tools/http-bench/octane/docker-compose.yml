@@ -1,0 +1,33 @@
+# Same-box Octane comparison stack. Brings up both:
+#  - the `anvilforge-bench` container on :8080  (in-process tester, hits self)
+#  - a Laravel Octane container on :8000        (the comparison)
+#
+# Then `scripts/compare-vs-octane.sh` (alongside this file) drives `oha`
+# against both from the host, in identical conditions, and prints a
+# side-by-side latency / RPS table.
+
+services:
+  anvil:
+    build:
+      context: ../../..
+      dockerfile: tools/http-bench/Dockerfile
+    # Use the bench binary's standalone serve mode — we want it
+    # answering external load, not running its own load generator.
+    command: ["--serve-only", "--serve-addr", "0.0.0.0:8080"]
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/json || exit 1"]
+      interval: 2s
+      retries: 30
+
+  octane:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8000/"]
+      interval: 2s
+      retries: 30

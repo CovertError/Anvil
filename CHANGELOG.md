@@ -7,6 +7,268 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### "Feel like Laravel" — zero-config first 5 minutes
+
+- **SQLite by default in `anvil new`.** `.env.example` ships with
+  `DATABASE_URL=sqlite://database/anvil.db?mode=rwc`. No Postgres install
+  needed for the welcome page. Postgres/MySQL remain a one-line `.env`
+  edit. The default scaffolded jobs migration was rewritten to use the
+  portable schema builder so the same migration runs on all three
+  drivers.
+- **`anvil new` auto-writes `.env` with a fresh `APP_KEY`.** No more
+  `cp .env.example .env` + `openssl rand` ceremony. Matches `laravel
+  new`'s automatic key generation.
+- **`vendor/anvil/` → `.anvil/`.** Framework shims (`main.rs`, `lib.rs`,
+  `build.rs`) are hidden by the dotfile convention, out of default `ls`
+  listings. The 611-line entry-point file is no longer the first thing a
+  new reader sees.
+- **`bootstrap/app.rs` uses `driver_pool()`.** Multi-driver out of the
+  box — previously the scaffold panicked on non-Postgres connections
+  because of `container.pool()`.
+- **README reorder.** 226 → 114 lines, leads with install → `anvil new`
+  → `anvil serve` in the first 25 lines. Dev-loop tuning, Cranelift,
+  hot-reload internals moved to
+  [docs: tuning the dev loop](docs/src/getting-started/dev-loop.md).
+- **Binary distribution.** `cargo-binstall` metadata in the CLI crate's
+  manifest, `.github/workflows/release.yml` for cross-platform tarballs
+  (musl-linux x86_64+aarch64, darwin x86_64+arm64, windows-msvc x86_64),
+  and `scripts/install-anvil.sh` for the `curl … | sh` one-liner.
+  `cargo install anvilforge-cli` still works (5–15 min cold compile);
+  `cargo binstall` and the curl path are seconds.
+
+### CRUD parity helpers
+
+- **`Model::create(pool, attrs)`** — Eloquent-shaped alias of
+  `instance.insert(pool)`. Matches Laravel's `Post::create($attrs)`
+  shape, without changing the underlying derive output.
+- **`migration!(StructName, "name", up = |s| {...}, down = |s| {...})`** —
+  closure-style migration macro. Six lines instead of twenty;
+  `#[derive(Migration)]` + the struct + the `CastMigration` impl all
+  folded into one macro call. Registers with `inventory::submit!`
+  identically, so `anvil migrate` still discovers it.
+- **New `make:*` scaffolders.** `anvil make:mail`, `make:notification`,
+  `make:policy`, `make:rule`, `make:resource` — closing the Laravel
+  parity gap for `make:mail`, `make:policy`, `make:notification`,
+  `make:rule`, `make:resource`.
+- **Facade-style helpers (`db()`, `cache()`, `queue()`, `mailer()`,
+  `storage()`, `events()`, `config()`).** Backed by a `tokio::task_local!`
+  Container installed by per-request middleware. Handlers can drop
+  `State<Container>` and write `let pool = db();` Laravel-style; the
+  explicit `State<Container>` extractor still works for code that
+  prefers it.
+
+### Docs
+
+- New: [docs/src/getting-started/from-laravel.md](docs/src/getting-started/from-laravel.md) —
+  ~120-row Laravel→Anvilforge mapping cheatsheet covering routes,
+  Eloquent → Cast, migrations, validation, Livewire → Spark, broadcasts,
+  mail, events, jobs, errors, auth, caching, testing.
+- New: [docs/src/getting-started/first-feature.md](docs/src/getting-started/first-feature.md) —
+  Posts-CRUD walkthrough from `anvil new` to working
+  index/show/store/destroy.
+- New: [docs/src/getting-started/dev-loop.md](docs/src/getting-started/dev-loop.md) —
+  the full sccache/mold/Cranelift/`anvil dev --hot` tuning guide moved
+  out of the README.
+- New: [docs/src/production/benchmarks.md](docs/src/production/benchmarks.md) —
+  explicit methodology page covering what the bench harness measures
+  (in-process loopback, no I/O, M-series) and what it doesn't (network,
+  DB, TLS handshake, x86), plus reproduction recipe.
+- New: [docs/src/subsystems/spark.md](docs/src/subsystems/spark.md) —
+  architecture write-up covering memory residency (~16 B per active
+  component, in the revision tracker; component instance itself is
+  dropped between requests), no session-affinity guarantee, failure
+  modes (tamper, key rotation, deploy rollover, snapshot size cap,
+  replay, intra-page races), and where Spark is the wrong choice.
+- Every page under `docs/src/subsystems/` and `docs/src/cast/` now
+  opens with its Laravel equivalent — `Cache → Laravel's Cache facade`,
+  `Bellows → Pusher-compatible Echo replacement`, `Cast → Eloquent`, etc.
+- Validation chapter extended with a Laravel-rules→Garde-attrs
+  translation table.
+
+### Security & correctness fixes
+
+- **Trusted-proxy filtering for `X-Forwarded-For`.** The rate limiter
+  previously honored XFF from any peer, letting hostile clients spoof
+  their IP and bypass per-IP rate limits. `client_ip()` now requires the
+  TCP peer (read from `ConnectInfo<SocketAddr>`) to be in
+  `[trusted_proxies] ranges`. Empty list = XFF ignored entirely. Six
+  unit tests cover trusted/untrusted peers, empty trusted list, missing
+  `ConnectInfo`, and multi-hop XFF parsing.
+- **Spark CSRF check on `POST /_spark/update`.** The `_token` field on
+  `UpdateRequest` was previously unread. It's now compared in
+  constant-time against the session-bound CSRF token; mismatch returns
+  HTTP 419 (Livewire-compatible "page expired" → JS runtime reloads).
+  Apps without a session layer pass through, matching the existing
+  `anvil_core` CSRF middleware behavior. Four integration tests.
+- **Optimistic concurrency on `/_spark/update`.** Snapshot `Memo` gained
+  a `rev: u64` field; the server tracks the last revision issued per
+  `memo.id` in a bounded LRU cache. Mismatched `rev` → HTTP 409. Two
+  simultaneous `/update` POSTs for the same component instance can no
+  longer last-write-wins. Four integration tests.
+- **Bellows subscriber leak fix.** Explicit `pusher:unsubscribe` now
+  aborts the right task (the channel-keyed subscription map), so
+  long-lived browsers swapping channels don't accumulate subscribers
+  for the lifetime of the process. Three integration tests cover
+  explicit-unsubscribe, dirty-disconnect cleanup, and duplicate-Subscribe
+  deduplication.
+
+### Observability & operational hardening
+
+- **Tracing spans on the Spark `/update` hot path.** Each per-component
+  call produces a `spark.update` span with `decode_us`, `dispatch_us`,
+  `render_us`, `encode_us`, `component`, `id`, `rev` fields. Production
+  apps see per-interaction latency under `RUST_LOG=spark=info` without
+  adding any new dependency.
+- **Snapshot version gate.** The envelope's `v: u8` is now read on
+  decode; mismatches return HTTP 426 Upgrade Required so the browser
+  knows to refresh assets, not a generic 4xx. Test covers the
+  `v=99` future-version path.
+- **Snapshot size telemetry.** `tracing::warn!` when a wire snapshot
+  exceeds 32 KB — operators see drift before the 64 KB hard cap fires.
+- **Request-ID middleware.** Auto-generates `x-request-id` (UUID v7,
+  sortable) when the inbound request doesn't carry one. Echoed on the
+  response; threaded into the JSON access log; available to handlers
+  via `req.extensions().get::<RequestId>()`.
+- **Configurable graceful drain timeout.** `[limits] drain_timeout =
+  "30s"` in `config/anvil.toml`. Previously hardcoded at 10 s.
+- **Per-route timeout overrides.** New `[[route_timeout]]` blocks in
+  the server config — match by path prefix, apply a per-route
+  `tokio::time::timeout`. Slow endpoints (uploads, long polls) no
+  longer force the global timeout up.
+- **`anvil tune` replaces `anvil doctor`.** Same functionality, less
+  "your install is sick" framing. `anvil doctor` kept as a hidden
+  alias for muscle memory.
+- **Starter seeder.** `DatabaseSeeder` in newly-scaffolded projects
+  inserts one demo user on first `anvil db:seed`, so the welcome
+  page has live data to render. SQLite-guarded; no-ops on other
+  drivers.
+
+### Single-binary deploy with embedded assets
+
+- New `embedded` module + `embed_static!` macro for baking `public/`
+  into the binary via `rust-embed`. Disk-served `ServeDir` remains the
+  default; the embedded set is consulted first under the `embed-assets`
+  cargo feature. Honors `ETag` + `If-None-Match` → 304 round-trips
+  out of the box. Walkthrough in
+  [docs/src/production/deploy.md](docs/src/production/deploy.md#single-binary-deploy-with-embedded-static-assets).
+- Public re-exports: `anvilforge::register_embedded_assets`,
+  `EmbeddedAsset`, `EmbeddedAssetFetcher`, `RequestId`, `embed_static!`,
+  `migration!`. The scaffold's `Cargo.toml` references for these names
+  now resolve cleanly.
+
+### Spark — third round of hardening
+
+- **APP_KEY rotation with `kid`.** New `kid: Option<u8>` field on the
+  snapshot envelope + `APP_KEYS="2:newkey,1:oldkey"` env form. Verifier
+  picks the key by `kid`; missing `kid` falls back to the first entry
+  (back-compat for snapshots issued pre-rotation). Apps can swap keys
+  without forcing every in-flight client to reload.
+- **Replay-protection window extended.** The per-`memo.id` revision
+  tracker's TTL bumped from 30 min → 24 h, so captured envelopes can't
+  be POSTed twice within a day of last interaction. ~3 MB at 50k
+  concurrent active components.
+- **Snapshot gzip compression.** Opt-in `gz:` envelope prefix
+  (`gz:b64url(gzip(JSON))`) kicks in above 4 KB of raw JSON. Reclaims
+  headroom under the 64 KB cap. Decoder detects the prefix
+  automatically; backward-compatible with plain b64 payloads.
+- **Better Spark error surface.** User-shaped action errors
+  (`InvalidArguments`, `UnknownMethod`) surface via `Effects.errors`
+  with a `action:<method>` key, so the JS runtime displays them
+  inline instead of the browser console showing a 500. System errors
+  still bail to 5xx for operator visibility.
+
+### Edge / TLS / server hardening
+
+- **Cert hot-reload.** `notify`-backed file watcher on `tls.cert` +
+  `tls.key`; new TLS handshakes pick up renewed certs without a process
+  restart. Existing connections keep the old cert. Standard Let's
+  Encrypt-style ops without the "swap cert → restart" runbook.
+- **L4 concurrency cap.** `[limits] max_concurrency = N` in
+  `config/anvil.toml`. Requests above the cap return HTTP 503 instead
+  of queueing — lets an LB steer traffic to healthy peers under
+  thundering-herd overload.
+- **Multi-cert SNI** — schema-only: `[[tls.certs]]` entries parse and
+  log a warning when configured; default cert is served until the
+  resolver lands in the next PR. Forward-compat so configs written
+  today keep working.
+- **ACME / Let's Encrypt** — documented as roadmap (`rustls-acme`
+  integration behind a feature flag). Hot-reload above is the
+  recommended path until then.
+
+### Bench infrastructure (the LinkedIn-comment headline ask)
+
+- **Postgres-in-the-loop endpoints.** `/db-trivial` (`SELECT 1`) and
+  `/db-row` (one realistic-shape row fetch) in the bench tool, seeded
+  via the existing `cast_core::Pool` machinery. `BENCH_DATABASE_URL`
+  picks the driver (sqlite default; Postgres in CI).
+- **Sweep mode + extended percentiles.** `anvil bench --sweep`
+  iterates concurrencies (default: 1, 2, 4, 8, 16, 32, 64, 128, 256,
+  512, 1024) and emits CSV with `p50 / p95 / p99 / p99.9 / p99.99`.
+  Replaces the single-data-point output with a tail-latency curve.
+- **RSS + cold-start TTFB** captured automatically. Reports `cold-start:
+  first 200 after X ms` and `RSS: Y KB` at start and end of each run.
+- **Reference Docker stack.** `tools/http-bench/Dockerfile` + Compose
+  file with Postgres + Redis side containers. `docker compose up`
+  reproduces the published x86 numbers on any machine.
+- **CI workflow.** `.github/workflows/bench-x86.yml` runs the Compose
+  stack on `ubuntu-latest` and refreshes `BENCHMARKS.md` at the repo
+  root on every push to `main`. Public x86 numbers, live.
+
+### Drift fixes (third-pass audit)
+
+- `RequestId` properly re-exported from `anvilforge` so
+  `Extension<RequestId>` compiles in handlers.
+- `CONTRIBUTING.md` updated from old `smith new` to `anvil new`.
+- Per-route timeout config documented in
+  [docs/src/production/config.md](docs/src/production/config.md).
+
+### Tier 5 — polish (`anvil new --tiny`, dev auto-installer, SNI resolver, Octane comparison)
+
+- **`anvil new --tiny`** — single-file scaffold (one `main.rs`, one
+  `Cargo.toml`). For demos, blog posts, benchmarks where the full
+  Laravel-style tree is overkill. End-to-end smoke: 57 total lines,
+  HTTP 200 on `/` in under 1 ms.
+- **First-run `anvil dev` speedup-tool check.** Detects missing
+  `cargo-watch`, `sccache`, and (on Linux) `mold`; if any are absent,
+  interactively prompts to `cargo install` them. Persists a marker at
+  `.anvil/.tune-checked` so subsequent runs stay silent. Bypass with
+  `ANVIL_SKIP_TUNE=1`. Replaces "run `anvil tune` and read its output"
+  as the first-day path.
+- **Multi-cert SNI resolver — real implementation.** `[[tls.certs]]`
+  entries are now actually served via a custom
+  `rustls::server::ResolvesServerCert`. Pre-loads every cert as
+  `Arc<CertifiedKey>` at startup; the top-level `cert`/`key` is the
+  fallback for unmatched hostnames. Same `*.example.com` wildcard
+  matching as the host-gating middleware.
+- **ACME schema landed** ([tls.acme] block — domains, contact,
+  cache_dir, directory). Runtime is held back pending a focused
+  `rustls-acme` version-pin PR (upstream 0.13 has rustls-version
+  mismatches against the workspace's pinned rest-of-TLS dep
+  graph). Configs surface as a clear startup error instead of
+  silently no-op'ing.
+- **Octane comparison harness.** `tools/http-bench/octane/Dockerfile`
+  builds a Laravel 11 + Swoole image with one route; the sibling
+  `docker-compose.yml` brings up both Anvil (via the bench tool's new
+  `--serve-only` mode) and Octane on the same host;
+  `scripts/compare-vs-octane.sh` drives `oha` against both stacks in
+  identical conditions. Replaces the "we cite Octane's published
+  numbers" hedge with a user-controllable A/B benchmark.
+- **`anvil-bench --serve-only`** — bring up the bench app on a stable
+  port and answer external requests indefinitely. Used by the Octane
+  comparison stack; also useful as a quick-start "give me an Anvil
+  server that has all the bench endpoints" target.
+
+### Internal
+
+- 30+ new tests across `anvil-core`, `spark`, `bellows`, `cast-core`,
+  plus 4 new tests covering the embedded-assets mount path and 5 new
+  snapshot tests covering `kid` rotation + gzip round-trip. Full
+  workspace at ~150 passing tests, zero failures.
+- `crates/smith/templates/` no longer empty — all scaffold content
+  is still inline Rust strings, just better-organized.
+- Workspace builds clean on every fresh scaffold (`anvil new app && cd
+  app && cargo check`).
+
 ## [0.3.1] — 2026-05-19
 
 **"Clean Bench."** `anvil new` now scaffolds a Laravel-clean project root.
@@ -44,7 +306,7 @@ If 0.2 was Eloquent parity, 0.3 is everything around it: reactive components,
 real-time push, production HTTP serving, AI-agent introspection, browser
 automation, Pest-style testing, and a CLI that finally feels like Artisan.
 
-### Headline numbers (measured on Apple Silicon, loopback)
+### Headline numbers (Apple Silicon, in-process loopback — see [methodology](docs/src/production/benchmarks.md))
 
 | | Anvilforge 0.3 | Laravel Octane (Swoole) | Ratio |
 |---|---|---|---|
@@ -56,6 +318,38 @@ automation, Pest-style testing, and a CLI that finally feels like Artisan.
 | Spark snapshot decode (HMAC, small) | **1.55 µs** | n/a | — |
 | Cached template render | **1.5 µs** | n/a | — |
 | Edit handler → see it run (`anvil dev --hot`) | **~460 ms** | ~0 s | competitive |
+
+**What these numbers are.** The bench harness (`tools/http-bench`) boots the
+full Anvilforge stack — Tower layers, container, Spark scope — in the same
+process as the load generator, hits `127.0.0.1` over keep-alive HTTP/1.1 with
+no TLS and no DB I/O, on an M-series MacBook with 12 performance cores. The
+Octane/Livewire column is the public Laravel project's own published Octane
+numbers for comparable hot-path endpoints, run on similar hardware classes.
+These figures measure **request-handling throughput in the absence of I/O
+stalls** — useful for sizing the framework's own overhead against PHP's,
+not for predicting wall-clock response time on a production app.
+
+**What they aren't.** A production x86 box, with real network RTT, real
+Postgres pool contention, real TLS handshakes on cold connections, and the
+kernel page cache under realistic memory pressure, will return different
+numbers. The ratio versus PHP-FPM/Swoole tends to shrink once response time
+is dominated by DB latency (every framework looks the same waiting on a
+slow query). It tends to *grow* under burst load where the PHP worker pool
+saturates and Anvilforge's Tokio scheduler stays linear. We publish the
+in-process numbers because they're the cleanest measurement of the
+framework itself; we don't claim they generalize to your production
+workload without measuring there too.
+
+Reproduce locally:
+
+```bash
+anvil bench                       # all three endpoints, 5s @ c=100
+anvil bench -c 200 -s 30          # more pressure, longer window
+anvil bench:micro                 # criterion microbenchmarks
+```
+
+Full methodology, hardware spec, and reproduction recipe live in
+[docs/src/production/benchmarks.md](docs/src/production/benchmarks.md).
 
 ### New crates
 

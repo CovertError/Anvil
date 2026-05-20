@@ -42,6 +42,12 @@ pin-project-lite = "0.2"
 # HTTP
 axum = { version = "0.7", features = ["macros", "ws", "multipart"] }
 axum-server = { version = "0.7", features = ["tls-rustls"] }
+# Direct rustls for the SNI cert resolver — version pinned to whatever
+# axum-server 0.7 / tokio-rustls pulls transitively to avoid double-link.
+rustls = "0.23"
+# (rustls-acme 0.13 has rustls-version-mismatch build errors against this
+#  workspace's pinned versions; the `[tls.acme]` schema is forward-compat
+#  but the runtime is a follow-up PR with a focused dep-version pin.)
 tower = { version = "0.5", features = ["util", "timeout"] }
 tower-http = { version = "0.5", features = ["trace", "cors", "compression-gzip", "compression-br", "fs", "limit", "timeout", "set-header"] }
 tower-sessions = "0.13"
@@ -139,6 +145,7 @@ itertools = "0.13"
 indexmap = { version = "2.6", features = ["serde"] }
 regex = "1.11"
 paste = "1.0"
+flate2 = "1.0"
 
 # Hot-reload of user code via dylib swap. Closes most of the dev-loop gap
 # vs Laravel for the "edit handler → see it run" cycle.
@@ -149,6 +156,10 @@ url = "2.5"
 bytes = "1.7"
 mime = "0.3"
 mime_guess = "2.0"
+
+# Compile-time embedding of `public/` assets into the binary so apps can ship
+# as a single executable. Used by `anvilforge-core`'s `embed-assets` feature.
+rust-embed = { version = "8.5", default-features = false, features = ["interpolate-folder-path"] }
 
 # Internal crates — published names use `anvilforge-*` prefix.
 # Workspace dep keys match published names; [lib].name fields preserve the old

@@ -20,10 +20,11 @@ use tower_http::trace::TraceLayer;
 use crate::container::Container;
 use crate::server_config::{
     AccessLogFormat, BasicAuthRule, CorsConfig, HstsConfig, IpAction, IpRule, ProxyRule,
-    RateLimitConfig, RewriteRule, ServerConfig, StaticMount, TlsConfig, TrailingSlashAction,
-    TrailingSlashConfig, TrailingSlashMode,
+    RateLimitConfig, RewriteRule, RouteTimeoutRule, ServerConfig, StaticMount, TlsConfig,
+    TrailingSlashAction, TrailingSlashConfig, TrailingSlashMode,
 };
 use crate::Error;
+use axum::extract::ConnectInfo;
 
 /// Apply every layer the server config calls for to the user's web router,
 /// then merge any static-file mounts. Returns a ready-to-serve `axum::Router`.
@@ -46,6 +47,50 @@ pub fn apply_layers(web: AxumRouter<Container>, cfg: &ServerConfig) -> AxumRoute
         router = router.layer(TimeoutLayer::new(timeout));
     }
 
+    // L4-ish concurrency cap. Tower's `GlobalConcurrencyLimitLayer` holds a
+    // semaphore shared across every request; clones of the inner service
+    // share the permit pool. Above the cap, new requests are answered with
+    // 503 Service Unavailable (mapped from the `Overloaded` error) instead
+    // of queueing indefinitely — protects against thundering-herd overload
+    // and lets an upstream LB steer traffic to healthy peers.
+    if let Some(max) = cfg.limits.max_concurrency {
+        let max = max.max(1) as usize;
+        let limiter = Arc::new(tokio::sync::Semaphore::new(max));
+        let limiter_clone = limiter.clone();
+        router = router.layer(axum::middleware::from_fn(
+            move |req: Request<Body>, next: Next| {
+                let limiter = limiter_clone.clone();
+                async move {
+                    match limiter.try_acquire() {
+                        Ok(_permit) => next.run(req).await,
+                        Err(_) => {
+                            let mut resp = Response::new(Body::from(
+                                "service overloaded — too many concurrent requests",
+                            ));
+                            *resp.status_mut() = StatusCode::SERVICE_UNAVAILABLE;
+                            resp
+                        }
+                    }
+                }
+            },
+        ));
+    }
+
+    // Per-route timeout overrides. Walk the request path against each
+    // configured prefix; first match wins. Applied BEFORE the global
+    // timeout layer above so that a slow upload endpoint can extend the
+    // window rather than fighting it.
+    if !cfg.route_timeouts.is_empty() {
+        let rules: Arc<Vec<RouteTimeoutRule>> = Arc::new(cfg.route_timeouts.clone());
+        let rules_clone = rules.clone();
+        router = router.layer(axum::middleware::from_fn(
+            move |req: Request<Body>, next: Next| {
+                let rules = rules_clone.clone();
+                async move { route_timeout_mw(rules, req, next).await }
+            },
+        ));
+    }
+
     // Virtual-host gating: only accept requests whose Host header matches a
     // configured `server_name`. Empty `server_name` = match-all.
     if !cfg.server_name.is_empty() {
@@ -58,15 +103,23 @@ pub fn apply_layers(web: AxumRouter<Container>, cfg: &ServerConfig) -> AxumRoute
         ));
     }
 
+    // Trusted-proxy CIDR list — captured once per `apply_layers` call so each
+    // middleware that reads the client IP can decide whether to honor
+    // X-Forwarded-For. Empty = ignore XFF entirely (safe default for direct-
+    // listen deployments).
+    let trusted: Arc<Vec<ipnet::IpNet>> = Arc::new(cfg.trusted_proxies.ranges.clone());
+
     // IP allow/deny + basic auth — apply first so unauthorized requests don't
     // touch any other layer.
     if !cfg.ip_rules.is_empty() {
         let rules = Arc::new(cfg.ip_rules.clone());
         let rules_clone = rules.clone();
+        let trusted_clone = trusted.clone();
         router = router.layer(axum::middleware::from_fn(
             move |req: Request<Body>, next: Next| {
                 let rules = rules_clone.clone();
-                async move { ip_rules_mw(rules, req, next).await }
+                let trusted = trusted_clone.clone();
+                async move { ip_rules_mw(rules, trusted, req, next).await }
             },
         ));
     }
@@ -191,10 +244,12 @@ pub fn apply_layers(web: AxumRouter<Container>, cfg: &ServerConfig) -> AxumRoute
     if cfg.rate_limit.per_ip.is_some() || !cfg.rate_limit.routes.is_empty() {
         let limiter = Arc::new(RateLimiter::from_config(&cfg.rate_limit));
         let limiter_clone = limiter.clone();
+        let trusted_clone = trusted.clone();
         router = router.layer(axum::middleware::from_fn(
             move |req: Request<Body>, next: Next| {
                 let limiter = limiter_clone.clone();
-                async move { rate_limit_mw(limiter, req, next).await }
+                let trusted = trusted_clone.clone();
+                async move { rate_limit_mw(limiter, trusted, req, next).await }
             },
         ));
     }
@@ -204,13 +259,20 @@ pub fn apply_layers(web: AxumRouter<Container>, cfg: &ServerConfig) -> AxumRoute
         AccessLogFormat::Combined | AccessLogFormat::Json
     ) {
         let format = cfg.access_log.format;
-        router =
-            router.layer(axum::middleware::from_fn(
-                move |req: Request<Body>, next: Next| async move {
-                    access_log_mw(format, req, next).await
-                },
-            ));
+        let trusted_clone = trusted.clone();
+        router = router.layer(axum::middleware::from_fn(
+            move |req: Request<Body>, next: Next| {
+                let trusted = trusted_clone.clone();
+                async move { access_log_mw(format, trusted, req, next).await }
+            },
+        ));
     }
+
+    // Request ID — generated if the inbound request didn't carry one, echoed
+    // back on the response. Threads through `tracing` so each log line for
+    // a given request shares a `request_id` field, which is the basic
+    // building block of trace correlation across services.
+    router = router.layer(axum::middleware::from_fn(request_id_mw));
 
     router
 }
@@ -223,6 +285,24 @@ fn mount_static(
     // Note: `ranges` is reserved for a future version of tower-http that exposes
     // per-instance range toggling. For now ranges are always enabled.
     let _ = mount.ranges;
+
+    // If the app registered an embedded-asset fetcher for this prefix (the
+    // single-binary distribution path), serve from memory instead of disk.
+    if let Some(fetcher) = crate::embedded::lookup(prefix) {
+        let cache = mount.cache;
+        let route_pat = format!("{}/*path", prefix.trim_end_matches('/'));
+        let nested = AxumRouter::<Container>::new().route(
+            &route_pat,
+            axum::routing::get(
+                move |axum::extract::Path(path): axum::extract::Path<String>,
+                      headers: HeaderMap| async move {
+                    serve_embedded(fetcher, cache, &path, &headers)
+                },
+            ),
+        );
+        return router.merge(nested);
+    }
+
     let svc = ServeDir::new(&mount.dir);
 
     let nested = AxumRouter::<Container>::new().nest_service(prefix, svc);
@@ -237,6 +317,84 @@ fn mount_static(
         nested
     };
     router.merge(nested)
+}
+
+/// Embedded-asset request handler: looks up the wildcard `path` in the
+/// registered fetcher, honors `If-None-Match` against the file's ETag, and
+/// returns 200/304/404.
+fn serve_embedded(
+    fetcher: crate::embedded::EmbeddedAssetFetcher,
+    cache: Option<Duration>,
+    path: &str,
+    headers: &HeaderMap,
+) -> Response<Body> {
+    let asset = match fetcher(path) {
+        Some(a) => a,
+        None => return not_found(),
+    };
+
+    if let (Some(client_tag), Some(asset_tag)) = (
+        headers
+            .get(axum::http::header::IF_NONE_MATCH)
+            .and_then(|v| v.to_str().ok()),
+        asset.etag.as_deref(),
+    ) {
+        if etag_matches(client_tag, asset_tag) {
+            let mut resp = Response::builder()
+                .status(StatusCode::NOT_MODIFIED)
+                .body(Body::empty())
+                .expect("304 body");
+            if let Some(d) = cache {
+                if let Ok(v) = HeaderValue::from_str(&format!("public, max-age={}", d.as_secs()))
+                {
+                    resp.headers_mut().insert("cache-control", v);
+                }
+            }
+            return resp;
+        }
+    }
+
+    let mut builder = Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", asset.content_type.as_str())
+        .header("content-length", asset.data.len());
+    if let Some(tag) = asset.etag.as_deref() {
+        builder = builder.header("etag", quote_etag(tag));
+    }
+    if let Some(d) = cache {
+        builder = builder.header("cache-control", format!("public, max-age={}", d.as_secs()));
+    }
+    builder
+        .body(Body::from(asset.data.into_owned()))
+        .unwrap_or_else(|_| not_found())
+}
+
+fn not_found() -> Response<Body> {
+    Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .body(Body::from("not found"))
+        .expect("404 body")
+}
+
+fn quote_etag(raw: &str) -> String {
+    if raw.starts_with('"') {
+        raw.to_string()
+    } else {
+        format!("\"{raw}\"")
+    }
+}
+
+fn etag_matches(client: &str, server: &str) -> bool {
+    let normalize = |s: &str| -> String {
+        s.split(',')
+            .map(|t| t.trim().trim_matches('"').trim_start_matches("W/").to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let server_norm = normalize(server);
+    normalize(client)
+        .split(',')
+        .any(|tag| tag == server_norm || tag == "*")
 }
 
 // ─── Serve entry points ─────────────────────────────────────────────────────
@@ -279,7 +437,11 @@ pub async fn serve(
     });
 
     let main_result = if let Some(tls) = &cfg.tls {
-        serve_tls(router, addr, tls, shutdown_main_rx).await
+        if tls.acme.is_some() {
+            serve_acme(router, addr, tls, cfg.limits.drain_timeout, shutdown_main_rx).await
+        } else {
+            serve_tls(router, addr, tls, cfg.limits.drain_timeout, shutdown_main_rx).await
+        }
     } else {
         serve_plain(router, addr, shutdown_main_rx).await
     };
@@ -414,11 +576,14 @@ async fn serve_plain(
     shutdown: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<(), Error> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, router)
-        .with_graceful_shutdown(async move {
-            let _ = shutdown.await;
-        })
-        .await?;
+    axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(async move {
+        let _ = shutdown.await;
+    })
+    .await?;
     Ok(())
 }
 
@@ -426,24 +591,241 @@ async fn serve_tls(
     router: AxumRouter,
     addr: SocketAddr,
     tls: &TlsConfig,
+    drain: Duration,
     shutdown: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<(), Error> {
-    let config = axum_server::tls_rustls::RustlsConfig::from_pem_file(&tls.cert, &tls.key)
-        .await
-        .map_err(|e| Error::Config(format!("tls load: {e}")))?;
+    // Path A: single cert pair → fast happy path, no resolver indirection.
+    // Path B: `[[tls.certs]]` entries present → build a custom
+    // `ResolvesServerCert` that picks the cert by ClientHello SNI hostname,
+    // with the top-level cert as the default for unmatched names.
+    let config = if tls.additional_certs.is_empty() {
+        axum_server::tls_rustls::RustlsConfig::from_pem_file(&tls.cert, &tls.key)
+            .await
+            .map_err(|e| Error::Config(format!("tls load: {e}")))?
+    } else {
+        let resolver = build_sni_resolver(tls)
+            .map_err(|e| Error::Config(format!("tls multi-cert load: {e}")))?;
+        let server_config = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_cert_resolver(Arc::new(resolver));
+        axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(server_config))
+    };
+
+    // Cert hot-reload: spawn a notify watcher on the cert + key paths. On
+    // any change, re-read the PEM files and `reload_from_pem_file` on the
+    // shared RustlsConfig — new TLS handshakes pick up the new cert without
+    // a process restart, dropping the "swap cert → restart server" runbook
+    // ops normally need.
+    let watch_paths = [tls.cert.clone(), tls.key.clone()];
+    let config_for_watch = config.clone();
+    let cert_path = tls.cert.clone();
+    let key_path = tls.key.clone();
+    tokio::task::spawn_blocking(move || {
+        if let Err(e) = watch_tls_certs(config_for_watch, cert_path, key_path, watch_paths) {
+            tracing::warn!(error = %e, "cert hot-reload watcher exited");
+        }
+    });
 
     let handle = axum_server::Handle::new();
     let handle_for_shutdown = handle.clone();
     tokio::spawn(async move {
         let _ = shutdown.await;
-        handle_for_shutdown.graceful_shutdown(Some(Duration::from_secs(10)));
+        handle_for_shutdown.graceful_shutdown(Some(drain));
     });
 
     axum_server::bind_rustls(addr, config)
         .handle(handle)
-        .serve(router.into_make_service())
+        .serve(router.into_make_service_with_connect_info::<SocketAddr>())
         .await
         .map_err(|e| Error::Internal(format!("tls serve: {e}")))?;
+    Ok(())
+}
+
+/// ACME-managed TLS serve path. Auto-obtains and rotates certs via Let's
+/// Encrypt (or any other ACME directory) using TLS-ALPN-01 in-process — no
+/// external certbot run required.
+///
+/// **Status:** the `[tls.acme]` schema parses today and apps written
+/// against it are forward-compatible. The runtime implementation is held
+/// back pending a focused PR that pins compatible `rustls-acme` /
+/// `rustls` / `axum-server` versions; the upstream `rustls-acme` 0.13
+/// release has build errors against the rustls version this workspace
+/// pins for the rest of TLS. Until that PR lands, ACME configs surface
+/// as a clear startup error rather than silently no-op'ing.
+async fn serve_acme(
+    _router: AxumRouter,
+    _addr: SocketAddr,
+    tls: &TlsConfig,
+    _drain: Duration,
+    _shutdown: tokio::sync::oneshot::Receiver<()>,
+) -> Result<(), Error> {
+    let acme = tls
+        .acme
+        .as_ref()
+        .expect("serve_acme called without [tls.acme]");
+    Err(Error::Config(format!(
+        "[tls.acme] is configured for {n} domain(s) but ACME runtime support \
+         is pending a follow-up PR (rustls-acme version pin). For now, use \
+         certbot in TLS-ALPN-01 mode and `[tls] cert`/`key` pointing at the \
+         certbot output; cert hot-reload handles renewals without restart.",
+        n = acme.domains.len(),
+    )))
+}
+
+/// SNI cert resolver — picks a `CertifiedKey` based on the ClientHello's
+/// SNI hostname. Falls back to the default cert when no entry matches.
+/// Matches `server_name` patterns the same way as the host-gating middleware:
+/// exact match, `*.example.com` wildcard for one-level subdomains, or `*` for
+/// any host.
+#[derive(Debug)]
+struct SniResolver {
+    /// Pre-compiled `(server_name, CertifiedKey)` pairs in declaration order.
+    /// First match wins, so put the most specific patterns first.
+    entries: Vec<(String, Arc<rustls::sign::CertifiedKey>)>,
+    default_key: Arc<rustls::sign::CertifiedKey>,
+}
+
+impl rustls::server::ResolvesServerCert for SniResolver {
+    fn resolve(
+        &self,
+        client_hello: rustls::server::ClientHello<'_>,
+    ) -> Option<Arc<rustls::sign::CertifiedKey>> {
+        let sni = client_hello.server_name().unwrap_or("").to_ascii_lowercase();
+        for (pattern, key) in &self.entries {
+            if matches_pattern(&sni, pattern) {
+                return Some(key.clone());
+            }
+        }
+        Some(self.default_key.clone())
+    }
+}
+
+fn build_sni_resolver(tls: &TlsConfig) -> std::io::Result<SniResolver> {
+    let default_key = load_certified_key(&tls.cert, &tls.key)?;
+    let mut entries = Vec::with_capacity(tls.additional_certs.len());
+    for entry in &tls.additional_certs {
+        let key = load_certified_key(&entry.cert, &entry.key)?;
+        entries.push((entry.server_name.to_ascii_lowercase(), key));
+    }
+    tracing::info!(
+        default_cert = %tls.cert.display(),
+        additional = tls.additional_certs.len(),
+        "tls: SNI resolver active"
+    );
+    Ok(SniResolver { entries, default_key })
+}
+
+fn load_certified_key(
+    cert_path: &std::path::Path,
+    key_path: &std::path::Path,
+) -> std::io::Result<Arc<rustls::sign::CertifiedKey>> {
+    use std::io::BufReader;
+
+    let cert_file = std::fs::File::open(cert_path).map_err(|e| {
+        std::io::Error::new(e.kind(), format!("opening cert {}: {e}", cert_path.display()))
+    })?;
+    let mut cert_reader = BufReader::new(cert_file);
+    let certs: Vec<rustls::pki_types::CertificateDer<'static>> = rustls_pemfile::certs(&mut cert_reader)
+        .collect::<std::io::Result<_>>()?;
+    if certs.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("no certificates in {}", cert_path.display()),
+        ));
+    }
+
+    let key_file = std::fs::File::open(key_path).map_err(|e| {
+        std::io::Error::new(e.kind(), format!("opening key {}: {e}", key_path.display()))
+    })?;
+    let mut key_reader = BufReader::new(key_file);
+    let key = rustls_pemfile::private_key(&mut key_reader)?.ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("no private key in {}", key_path.display()),
+        )
+    })?;
+
+    let signing_key = rustls::crypto::ring::sign::any_supported_type(&key)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("sign: {e}")))?;
+
+    Ok(Arc::new(rustls::sign::CertifiedKey::new(certs, signing_key)))
+}
+
+/// Blocking-thread watcher that re-loads the rustls config whenever the cert
+/// or key file on disk changes. Uses `notify` (already a workspace dep for
+/// the dev file watcher) so we don't add anything new.
+///
+/// Coalescing: many editors write atomically by rename, which produces
+/// `Modify`+`Create` events in quick succession; we ignore that and just
+/// reload on any non-error event. The reload is itself cheap and idempotent.
+fn watch_tls_certs(
+    config: axum_server::tls_rustls::RustlsConfig,
+    cert: std::path::PathBuf,
+    key: std::path::PathBuf,
+    watch_paths: [std::path::PathBuf; 2],
+) -> std::io::Result<()> {
+    use notify::{RecursiveMode, Watcher};
+    use std::sync::mpsc::channel;
+
+    let (tx, rx) = channel::<notify::Result<notify::Event>>();
+    let mut watcher = notify::recommended_watcher(move |res| {
+        let _ = tx.send(res);
+    })
+    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("notify init: {e}")))?;
+
+    // Watch the parent directories — file-level watches don't survive
+    // editors that rename-on-write (vim, cargo, etc.), but directory watches
+    // catch the rename plus the new file's creation.
+    for p in &watch_paths {
+        if let Some(parent) = p.parent() {
+            watcher
+                .watch(parent, RecursiveMode::NonRecursive)
+                .map_err(|e| {
+                    std::io::Error::new(std::io::ErrorKind::Other, format!("notify watch: {e}"))
+                })?;
+        }
+    }
+
+    let runtime = tokio::runtime::Handle::try_current().ok();
+    loop {
+        let Ok(event) = rx.recv() else { break };
+        let Ok(event) = event else { continue };
+        // Only react to events touching our cert/key files specifically — the
+        // directory watcher fires for any sibling file too.
+        let touches_us = event.paths.iter().any(|p| p == &cert || p == &key);
+        if !touches_us {
+            continue;
+        }
+        tracing::info!(
+            cert = %cert.display(),
+            key = %key.display(),
+            "tls cert change detected — reloading"
+        );
+        let cert = cert.clone();
+        let key = key.clone();
+        let config = config.clone();
+        let reload = async move {
+            if let Err(e) = config.reload_from_pem_file(&cert, &key).await {
+                tracing::warn!(error = %e, "tls reload failed");
+            } else {
+                tracing::info!("tls cert reloaded successfully");
+            }
+        };
+        if let Some(rt) = &runtime {
+            rt.spawn(reload);
+        } else {
+            // No current tokio runtime (e.g. unit test contexts) — best-effort
+            // fire-and-forget via a fresh single-threaded runtime.
+            std::thread::spawn(|| {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build();
+                if let Ok(rt) = rt {
+                    rt.block_on(reload);
+                }
+            });
+        }
+    }
     Ok(())
 }
 
@@ -544,12 +926,13 @@ fn parse_route_spec(spec: &str) -> (Option<Method>, String) {
 
 async fn rate_limit_mw(
     limiter: Arc<RateLimiter>,
+    trusted: Arc<Vec<ipnet::IpNet>>,
     req: Request<Body>,
     next: Next,
 ) -> Response<Body> {
     let method = req.method().clone();
     let path = req.uri().path().to_string();
-    let bucket = format!("{}|{}|{}", client_ip(&req), method, path);
+    let bucket = format!("{}|{}|{}", client_ip(&req, &trusted), method, path);
 
     if let Some(rule) = limiter.rule_for(&method, &path) {
         if !limiter.check(&bucket, rule) {
@@ -562,25 +945,121 @@ async fn rate_limit_mw(
     next.run(req).await
 }
 
-fn client_ip(req: &Request<Body>) -> String {
-    // Prefer `X-Forwarded-For` if a value is present — trusted-proxy filtering
-    // is intentionally skipped in v1; apps behind untrusted LBs should disable
-    // rate limiting per-IP and rely on the LB.
-    if let Some(v) = req.headers().get("x-forwarded-for") {
-        if let Ok(s) = v.to_str() {
-            if let Some(first) = s.split(',').next() {
-                return first.trim().to_string();
+/// Resolve the client's IP, honoring `X-Forwarded-For` **only** when the
+/// direct TCP peer is in `trusted` (set via `[trusted_proxies] ranges` in the
+/// server config).
+///
+/// Order of precedence:
+///   1. TCP peer (`ConnectInfo<SocketAddr>`) is in a trusted CIDR ⇒ take the
+///      first hop in XFF (the original client per RFC 7239).
+///   2. Otherwise ⇒ the TCP peer is the client. XFF from an untrusted peer
+///      is ignored, so rate limits and IP rules can't be spoofed by hostile
+///      clients setting their own XFF header.
+///   3. No `ConnectInfo` extension (rare — only if the router was started
+///      without `into_make_service_with_connect_info`) ⇒ `"unknown"`.
+fn client_ip(req: &Request<Body>, trusted: &[ipnet::IpNet]) -> String {
+    let peer: Option<std::net::IpAddr> = req
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ci| ci.0.ip());
+
+    let peer_trusted = match peer {
+        Some(addr) => !trusted.is_empty() && trusted.iter().any(|net| net.contains(&addr)),
+        None => false,
+    };
+
+    if peer_trusted {
+        if let Some(v) = req.headers().get("x-forwarded-for") {
+            if let Ok(s) = v.to_str() {
+                if let Some(first) = s.split(',').next() {
+                    let candidate = first.trim();
+                    if !candidate.is_empty() {
+                        return candidate.to_string();
+                    }
+                }
             }
         }
     }
-    // axum exposes the SocketAddr via ConnectInfo when configured. Without it
-    // we fall back to a single global bucket so the rate limit still applies.
-    "unknown".into()
+
+    peer.map(|a| a.to_string()).unwrap_or_else(|| "unknown".into())
 }
 
 // ─── Access log ─────────────────────────────────────────────────────────────
 
-async fn access_log_mw(format: AccessLogFormat, req: Request<Body>, next: Next) -> Response<Body> {
+/// Apply a per-route timeout to a request whose path matches one of the
+/// configured prefixes. First match wins. Requests that don't match any
+/// rule fall through to the global `limits.request_timeout` (if any).
+async fn route_timeout_mw(
+    rules: Arc<Vec<RouteTimeoutRule>>,
+    req: Request<Body>,
+    next: Next,
+) -> Response<Body> {
+    let path = req.uri().path().to_string();
+    let matching = rules.iter().find(|r| path.starts_with(&r.prefix));
+    match matching {
+        Some(rule) => {
+            let timeout = rule.timeout;
+            match tokio::time::timeout(timeout, next.run(req)).await {
+                Ok(resp) => resp,
+                Err(_) => {
+                    tracing::debug!(
+                        path,
+                        timeout_ms = timeout.as_millis(),
+                        "route timeout exceeded"
+                    );
+                    let mut resp = Response::new(Body::from("request timed out"));
+                    *resp.status_mut() = StatusCode::REQUEST_TIMEOUT;
+                    resp
+                }
+            }
+        }
+        None => next.run(req).await,
+    }
+}
+
+/// Generate or pass through `x-request-id`. If the inbound request carries
+/// one, reuse it (lets upstream LBs / clients drive the trace ID); otherwise
+/// mint a UUID v7 (time-ordered, sortable). Always echoed on the response so
+/// log entries can be correlated by the same id from either side.
+async fn request_id_mw(mut req: Request<Body>, next: Next) -> Response<Body> {
+    const HEADER: &str = "x-request-id";
+
+    let inbound = req
+        .headers()
+        .get(HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
+    let request_id = inbound.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+
+    if let Ok(v) = HeaderValue::from_str(&request_id) {
+        req.headers_mut().insert(HeaderName::from_static(HEADER), v.clone());
+        // Run the handler with the id available in the request extensions so
+        // downstream code (and the trace layer) can read it without parsing
+        // headers again.
+        req.extensions_mut().insert(RequestId(request_id.clone()));
+
+        let mut resp = next.run(req).await;
+        resp.headers_mut().insert(HeaderName::from_static(HEADER), v);
+        resp
+    } else {
+        next.run(req).await
+    }
+}
+
+/// Typed wrapper for the per-request id, stored in `Request::extensions`
+/// by the request-id middleware. Handlers can pull it via
+/// `req.extensions().get::<RequestId>()` (or via the axum
+/// `Extension<RequestId>` extractor).
+#[derive(Debug, Clone)]
+pub struct RequestId(pub String);
+
+async fn access_log_mw(
+    format: AccessLogFormat,
+    trusted: Arc<Vec<ipnet::IpNet>>,
+    req: Request<Body>,
+    next: Next,
+) -> Response<Body> {
     let started = Instant::now();
     let method = req.method().clone();
     let path = req.uri().path().to_string();
@@ -600,7 +1079,11 @@ async fn access_log_mw(format: AccessLogFormat, req: Request<Body>, next: Next) 
         .get("user-agent")
         .and_then(|v| v.to_str().ok())
         .map(String::from);
-    let ip = client_ip(&req);
+    let ip = client_ip(&req, &trusted);
+    let request_id = req
+        .extensions()
+        .get::<RequestId>()
+        .map(|id| id.0.clone());
 
     let resp = next.run(req).await;
     let elapsed = started.elapsed();
@@ -635,6 +1118,7 @@ async fn access_log_mw(format: AccessLogFormat, req: Request<Body>, next: Next) 
                     "referer": referer,
                     "user_agent": ua,
                     "duration_ms": elapsed.as_millis(),
+                    "request_id": request_id,
                 }),
                 "request"
             );
@@ -1109,9 +1593,14 @@ fn apply_cors_headers(
 
 // ─── IP allow/deny ──────────────────────────────────────────────────────────
 
-async fn ip_rules_mw(rules: Arc<Vec<IpRule>>, req: Request<Body>, next: Next) -> Response<Body> {
+async fn ip_rules_mw(
+    rules: Arc<Vec<IpRule>>,
+    trusted: Arc<Vec<ipnet::IpNet>>,
+    req: Request<Body>,
+    next: Next,
+) -> Response<Body> {
     let path = req.uri().path().to_string();
-    let ip_str = client_ip(&req);
+    let ip_str = client_ip(&req, &trusted);
     let ip = ip_str.parse::<std::net::IpAddr>().ok();
 
     for rule in rules.iter() {
@@ -1239,4 +1728,84 @@ async fn upstream_to_axum(resp: reqwest::Response) -> Result<Response<Body>, Str
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{IpAddr, Ipv4Addr};
+
+    fn make_req(peer: Option<SocketAddr>, xff: Option<&str>) -> Request<Body> {
+        let mut req = Request::builder();
+        if let Some(v) = xff {
+            req = req.header("x-forwarded-for", v);
+        }
+        let mut req = req.body(Body::empty()).unwrap();
+        if let Some(addr) = peer {
+            req.extensions_mut().insert(ConnectInfo(addr));
+        }
+        req
+    }
+
+    fn cidr(s: &str) -> ipnet::IpNet {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn xff_ignored_when_peer_is_not_trusted() {
+        // Hostile client direct-connects and sets their own XFF — must be ignored.
+        let peer = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 5)), 12345);
+        let req = make_req(Some(peer), Some("198.51.100.1"));
+        let trusted = vec![cidr("10.0.0.0/8")];
+
+        assert_eq!(client_ip(&req, &trusted), "203.0.113.5");
+    }
+
+    #[test]
+    fn xff_honored_when_peer_is_a_trusted_proxy() {
+        // The LB at 10.0.0.5 forwards the original client's IP.
+        let peer = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)), 443);
+        let req = make_req(Some(peer), Some("198.51.100.1, 10.0.0.5"));
+        let trusted = vec![cidr("10.0.0.0/8")];
+
+        assert_eq!(client_ip(&req, &trusted), "198.51.100.1");
+    }
+
+    #[test]
+    fn empty_trusted_list_means_xff_is_never_honored() {
+        // Even XFF from a private peer is ignored when no trusted ranges configured.
+        let peer = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)), 443);
+        let req = make_req(Some(peer), Some("198.51.100.1"));
+        let trusted: Vec<ipnet::IpNet> = vec![];
+
+        assert_eq!(client_ip(&req, &trusted), "10.0.0.5");
+    }
+
+    #[test]
+    fn no_xff_falls_back_to_peer() {
+        let peer = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)), 443);
+        let req = make_req(Some(peer), None);
+        let trusted = vec![cidr("10.0.0.0/8")];
+
+        assert_eq!(client_ip(&req, &trusted), "10.0.0.5");
+    }
+
+    #[test]
+    fn missing_connect_info_returns_unknown() {
+        // Defensive: a router built without `into_make_service_with_connect_info`
+        // won't have the extension; we shouldn't panic, and we shouldn't trust XFF.
+        let req = make_req(None, Some("198.51.100.1"));
+        let trusted = vec![cidr("10.0.0.0/8")];
+
+        assert_eq!(client_ip(&req, &trusted), "unknown");
+    }
+
+    #[test]
+    fn xff_with_whitespace_and_multiple_hops_picks_first() {
+        let peer = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)), 443);
+        let req = make_req(Some(peer), Some("  198.51.100.1 ,10.0.0.5, 10.0.0.7"));
+        let trusted = vec![cidr("10.0.0.0/8")];
+
+        assert_eq!(client_ip(&req, &trusted), "198.51.100.1");
+    }
 }

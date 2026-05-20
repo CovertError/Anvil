@@ -237,6 +237,16 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
                 Ok(Self { #pk_field_ident: row.0, ..self })
             }
 
+            /// Eloquent-style alias for `.insert(pool)` — same behaviour, the
+            /// name a Laravel developer reaches for. `Post::create(&pool, post)`
+            /// is interchangeable with `post.insert(&pool)`.
+            pub async fn create(
+                pool: &::anvilforge::cast::sqlx::PgPool,
+                attrs: Self,
+            ) -> ::anvilforge::cast::Result<Self> {
+                attrs.insert(pool).await
+            }
+
             /// Update an existing row by primary key. Returns the updated model.
             /// Sets `updated_at = CURRENT_TIMESTAMP` automatically.
             ///

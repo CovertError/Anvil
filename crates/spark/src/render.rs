@@ -85,6 +85,27 @@ pub fn signing() -> (String, bool) {
     (key, encrypt)
 }
 
+/// The full keyring for snapshot verification. Pulls `APP_KEYS` when set
+/// (`"1:keyA,2:keyB"` form — first entry is the active signing key); falls
+/// back to a single `(0, APP_KEY)` pair when `APP_KEYS` is absent, so apps
+/// that don't rotate stay one-line.
+///
+/// Returned `(kid, key)` pairs are owned `String`s — caller borrows as
+/// `&[(u8, &str)]` before handing to `Envelope::verify_with_keys`.
+pub fn keyring() -> Vec<(u8, String)> {
+    if let Ok(raw) = std::env::var("APP_KEYS") {
+        let parsed = crate::snapshot::parse_keyring(&raw);
+        if !parsed.is_empty() {
+            return parsed;
+        }
+        tracing::warn!(
+            "APP_KEYS set but no valid `kid:key` entries parsed — falling back to APP_KEY"
+        );
+    }
+    let (key, _) = signing();
+    vec![(0, key)]
+}
+
 /// Build the wrapped DOM string for a freshly-mounted component.
 pub fn wrap(html: &str, memo: &Memo, snapshot_wire: &str) -> String {
     let listeners_attr = if memo.listeners.is_empty() {
@@ -126,6 +147,7 @@ pub fn render_mount(name: &str, props: &serde_json::Value) -> Result<String> {
         view: component.view.to_string(),
         listeners: (entry.listeners)(),
         errors: None,
+        rev: 0,
     };
 
     let html = component.state.render()?;

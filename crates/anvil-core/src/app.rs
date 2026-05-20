@@ -145,9 +145,19 @@ impl Application {
     /// applied via `into_router_with_config`.
     pub fn into_router(self) -> AxumRouter {
         let cfg = self.server_config.clone();
+        let container_for_mw = self.container.clone();
         let combined = self.web.merge(self.api);
         let combined = crate::server::apply_layers(combined, &cfg);
         combined
+            // Install the container into a task-local for the duration of each
+            // request so the facade helpers (`db()`, `cache()`, `queue()`,
+            // `current()`) work without `State<Container>` in handler signatures.
+            .layer(axum::middleware::from_fn(
+                move |req: axum::http::Request<axum::body::Body>, next: axum::middleware::Next| {
+                    let c = container_for_mw.clone();
+                    async move { crate::middleware::inject_container_mw(c, req, next).await }
+                },
+            ))
             .layer(TraceLayer::new_for_http())
             .with_state(self.container.clone())
     }
@@ -161,8 +171,17 @@ impl Application {
         let shutdown_handle = self.shutdown.clone().install();
         let cfg = self.server_config.clone();
         let container = self.container.clone();
+        let container_for_mw = container.clone();
         let combined = self.web.merge(self.api);
         let layered = crate::server::apply_layers(combined, &cfg)
+            // Install the container into a task-local for the duration of each
+            // request — see the corresponding block in `into_router()`.
+            .layer(axum::middleware::from_fn(
+                move |req: axum::http::Request<axum::body::Body>, next: axum::middleware::Next| {
+                    let c = container_for_mw.clone();
+                    async move { crate::middleware::inject_container_mw(c, req, next).await }
+                },
+            ))
             .layer(TraceLayer::new_for_http())
             .with_state(container);
 

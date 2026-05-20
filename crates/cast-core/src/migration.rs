@@ -27,6 +27,70 @@ pub fn collected() -> Vec<Box<dyn Migration>> {
         .collect()
 }
 
+/// Closure-style migration — Laravel's
+/// `Schema::create('posts', function (Blueprint $t) { ... })` ported to Rust.
+///
+/// Expands to a unit struct + `Migration` impl + `inventory::submit!` —
+/// the same machinery `#[derive(Migration)]` produces, just spelled in
+/// six lines instead of twenty.
+///
+/// Usage:
+///
+/// ```ignore
+/// use anvilforge::prelude::*;
+///
+/// migration!(CreatePostsTable, "2026_05_20_create_posts_table",
+///     up = |s| {
+///         s.create("posts", |t| {
+///             t.id();
+///             t.string("title").not_null();
+///             t.text("body").not_null();
+///             t.timestamps();
+///         });
+///     },
+///     down = |s| {
+///         s.drop_if_exists("posts");
+///     },
+/// );
+/// ```
+///
+/// The struct name is explicit (mirrors Laravel's class name) so the
+/// inventory registration stays deterministic and rollback diagnostics
+/// can name the migration in panics/errors.
+#[macro_export]
+macro_rules! migration {
+    (
+        $struct_name:ident,
+        $name:expr,
+        up = $up:expr,
+        down = $down:expr $(,)?
+    ) => {
+        pub struct $struct_name;
+
+        impl $crate::migration::Migration for $struct_name {
+            fn name(&self) -> &'static str {
+                $name
+            }
+            fn up(&self, schema: &mut $crate::schema::Schema) {
+                let f: fn(&mut $crate::schema::Schema) = $up;
+                f(schema);
+            }
+            fn down(&self, schema: &mut $crate::schema::Schema) {
+                let f: fn(&mut $crate::schema::Schema) = $down;
+                f(schema);
+            }
+        }
+
+        $crate::inventory::submit! {
+            $crate::migration::MigrationRegistration {
+                builder: || -> ::std::boxed::Box<dyn $crate::migration::Migration> {
+                    ::std::boxed::Box::new($struct_name)
+                },
+            }
+        }
+    };
+}
+
 pub struct MigrationRunner {
     pool: Pool,
     migrations: Vec<Box<dyn Migration>>,
@@ -462,4 +526,49 @@ pub struct MigrationStatus {
     pub name: String,
     pub applied: bool,
     pub batch: Option<i32>,
+}
+
+#[cfg(test)]
+mod macro_tests {
+    use super::*;
+    use crate::schema::Schema;
+
+    // Exercise the `migration!` macro at compile time AND assert that it
+    // produces a Migration with the right name + up/down behaviour.
+    crate::migration!(
+        TestCreateThingsTable,
+        "2026_01_01_000003_create_things_table",
+        up = |s| {
+            s.create("things", |t| {
+                t.id();
+                t.string("name").not_null();
+            });
+        },
+        down = |s| {
+            s.drop_if_exists("things");
+        },
+    );
+
+    #[test]
+    fn closure_migration_macro_expands_into_a_working_migration() {
+        let m = TestCreateThingsTable;
+        assert_eq!(m.name(), "2026_01_01_000003_create_things_table");
+
+        // The schema builder records DDL statements as side effects of the
+        // `t.string()` / `s.drop_if_exists()` calls — we just want to check
+        // that running up/down doesn't panic and produces *some* statements.
+        let mut s_up = Schema::for_driver(Driver::Sqlite);
+        m.up(&mut s_up);
+        assert!(
+            !s_up.statements.is_empty(),
+            "up() should emit at least one DDL statement"
+        );
+
+        let mut s_down = Schema::for_driver(Driver::Sqlite);
+        m.down(&mut s_down);
+        assert!(
+            !s_down.statements.is_empty(),
+            "down() should emit at least one DDL statement"
+        );
+    }
 }

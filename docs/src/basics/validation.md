@@ -58,6 +58,63 @@ async fn store(
 }
 ```
 
+## Laravel rules → Garde attributes
+
+If you reach for Laravel's pipe-separated rule strings (`'required|string|max:255'`),
+here's the direct translation table. Each Laravel rule maps to one (or
+zero) `#[garde(...)]` attribute on the field.
+
+| Laravel rule | Garde attribute | Notes |
+|---|---|---|
+| `required` | (use a non-`Option` field type) | Rust's type system already enforces this — make the field `String` not `Option<String>`. |
+| `nullable` | `Option<T>` + `#[garde(skip)]` (when present) | A nullable optional field. |
+| `string` | (field type `String`) | Type-enforced. |
+| `integer` | (field type `i64` / `i32`) | Type-enforced. |
+| `boolean` | (field type `bool`) | Type-enforced. |
+| `min:N` (string/array) | `#[garde(length(min = N))]` | |
+| `max:N` (string/array) | `#[garde(length(max = N))]` | |
+| `min:N` (numeric) | `#[garde(range(min = N))]` | |
+| `max:N` (numeric) | `#[garde(range(max = N))]` | |
+| `between:A,B` | `#[garde(length(min = A, max = B))]` or `range(min = A, max = B)` | |
+| `email` | `#[garde(email)]` | |
+| `url` | `#[garde(url)]` | |
+| `uuid` | `#[garde(pattern(r"^[0-9a-fA-F-]{36}$"))]` (or field type `uuid::Uuid`) | |
+| `ip` / `ipv4` / `ipv6` | `#[garde(ip)]` | |
+| `regex:/pattern/` | `#[garde(pattern(r"pattern"))]` | Rust regex syntax. |
+| `in:foo,bar,baz` | `#[garde(custom(in_set))]` + a small helper | Or use a Rust `enum`. |
+| `confirmed` (e.g. `password`) | Two fields + `#[garde(custom(...))]` checking equality | |
+| `exists:posts,id` | `#[garde(custom(...))]` querying the DB | Or check in the handler. |
+| `unique:users,email` | `#[garde(custom(...))]` querying the DB | Often cleaner as a handler-side check. |
+| `same:other_field` | `#[garde(custom(...))]` with cross-field access | Garde gives you the full struct in context. |
+
+**Worked example** — Laravel:
+
+```php
+public function rules() {
+    return [
+        'title'     => 'required|string|min:1|max:200',
+        'body'      => 'required|string',
+        'published' => 'nullable|boolean',
+    ];
+}
+```
+
+Anvilforge:
+
+```rust
+#[derive(Debug, Deserialize, Validate, FormRequest)]
+pub struct StorePostRequest {
+    #[garde(length(min = 1, max = 200))]
+    pub title: String,
+
+    #[garde(length(min = 1))]
+    pub body: String,
+
+    #[garde(skip)]
+    pub published: Option<bool>,
+}
+```
+
 ## Garde rule cheatsheet
 
 ```rust

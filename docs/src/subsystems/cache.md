@@ -1,5 +1,9 @@
 # Cache
 
+Anvilforge's cache is Laravel's `Cache` facade in Rust shape — `get` /
+`put` / `remember` / `forget` across an in-process [Moka](https://docs.rs/moka)
+store (the default) or a shared Redis backend (set `CACHE_DRIVER=redis`).
+
 ```rust
 use anvilforge::cache::CacheStore;
 use std::time::Duration;

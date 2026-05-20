@@ -20,16 +20,22 @@ async fn list_posts(State(c): State<Container>) -> Result<Json<Vec<Post>>> {
 }
 
 async fn create_post(State(c): State<Container>, payload: StorePostRequest) -> Result<Json<Post>> {
-    let row: (i64,) = sqlx::query_as(
-        "INSERT INTO posts (author_id, title, body, published) VALUES ($1, $2, $3, $4) RETURNING id",
+    // `Post::create(pool, attrs)` is the Eloquent-shaped helper:
+    // construct the struct (id defaults to 0, the DB assigns it on INSERT),
+    // and the derive-generated method does the INSERT + RETURNING.
+    // Compare to Laravel's `Post::create($request->validated())`.
+    let post = Post::create(
+        c.pool(),
+        Post {
+            id: 0,
+            author_id: payload.author_id,
+            title: payload.title,
+            body: payload.body,
+            published: payload.published.unwrap_or(false),
+            created_at: None,
+            updated_at: None,
+        },
     )
-    .bind(payload.author_id)
-    .bind(&payload.title)
-    .bind(&payload.body)
-    .bind(payload.published.unwrap_or(false))
-    .fetch_one(c.pool())
-    .await
-    .map_err(Error::Database)?;
-    let post = Post::find(c.pool(), row.0).await?.ok_or(Error::NotFound)?;
+    .await?;
     Ok(Json(post))
 }

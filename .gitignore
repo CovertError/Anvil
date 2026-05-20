@@ -17,3 +17,6 @@ node_modules/
 
 .idea/
 .vscode/
+
+# Claude Code internal worktrees — never push these (each is a full repo copy).
+.claude/worktrees/

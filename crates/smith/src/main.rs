@@ -14,7 +14,11 @@ mod commands;
     name = "anvil",
     about = "Forge a Rust web app — Anvilforge's CLI",
     version,
-    long_about = None
+    long_about = None,
+    after_help = "\
+Coming from Laravel?  https://github.com/anvilforge/anvilforge/blob/main/docs/src/getting-started/from-laravel.md
+First feature walkthrough: https://github.com/anvilforge/anvilforge/blob/main/docs/src/getting-started/first-feature.md
+",
 )]
 struct Cli {
     #[command(subcommand)]
@@ -27,6 +31,19 @@ enum Commands {
     New {
         /// Project name (a new directory will be created).
         name: String,
+        /// Single-file mode: emit just `main.rs` + `Cargo.toml`. No
+        /// Laravel-style directories, no migrations, no bootstrap layer.
+        /// Useful for demos, blog posts, and benchmarks where the
+        /// full scaffold is more structure than the example needs.
+        #[arg(long)]
+        tiny: bool,
+        /// Database backend. Accepts a shorthand (`sqlite`, `postgres`,
+        /// `mysql`) or a full URL. Shorthands assume Laravel Herd's default
+        /// host + credentials. With `sqlite` (the default), the DB file is
+        /// touched on disk. With `postgres`/`mysql`, the named database is
+        /// created via the local `psql`/`mysql` client.
+        #[arg(long)]
+        db: Option<String>,
     },
 
     /// Generate a model, migration, controller, etc.
@@ -82,6 +99,31 @@ enum Commands {
     /// Scaffold a Spark (Livewire-equivalent) reactive component.
     #[command(name = "make:component")]
     MakeComponent { name: String },
+
+    /// Scaffold a Mailable — Laravel's `make:mail` equivalent.
+    #[command(name = "make:mail")]
+    MakeMail { name: String },
+
+    /// Scaffold a Notification class — Laravel's `make:notification`.
+    #[command(name = "make:notification")]
+    MakeNotification { name: String },
+
+    /// Scaffold an authorization Policy struct — Laravel's `make:policy`.
+    #[command(name = "make:policy")]
+    MakePolicy {
+        name: String,
+        /// Optional model the policy is bound to (defaults to inferring from the name).
+        #[arg(long)]
+        model: Option<String>,
+    },
+
+    /// Scaffold a custom validation Rule — Laravel's `make:rule`.
+    #[command(name = "make:rule")]
+    MakeRule { name: String },
+
+    /// Scaffold an API Resource serializer — Laravel's `make:resource`.
+    #[command(name = "make:resource")]
+    MakeResource { name: String },
 
     /// Scaffold auth — login + register + logout views and routes (Breeze-equivalent).
     #[command(name = "make:auth")]
@@ -172,8 +214,11 @@ enum Commands {
         hot: bool,
     },
 
-    /// Diagnose the dev environment and print speedup recommendations.
-    Doctor,
+    /// Detect installed dev-loop speedups (sccache, mold/lld, Cranelift, …)
+    /// and recommend what to install for faster rebuilds. `anvil doctor`
+    /// is a kept-for-back-compat alias.
+    #[command(aliases = ["doctor"])]
+    Tune,
 
     /// Format the workspace (`cargo fmt --all`).
     Fmt {
@@ -194,6 +239,31 @@ enum Commands {
         /// Reinstall over an existing installation.
         #[arg(long)]
         force: bool,
+    },
+
+    /// Wire this project into Laravel Herd: creates an nginx proxy at
+    /// `https://<name>.test` → 127.0.0.1:<port> and patches APP_URL / APP_ADDR
+    /// in `.env`. Defaults to port 8081 because Herd's bundled Reverb service
+    /// occupies Anvil's usual 8080.
+    #[command(name = "herd:link")]
+    HerdLink {
+        /// Domain label under Herd's TLD. Defaults to the current directory name.
+        #[arg(long)]
+        domain: Option<String>,
+        /// Local port Anvil binds to (and that Herd will proxy to).
+        #[arg(long, default_value_t = 8081)]
+        port: u16,
+        /// Skip TLS — proxy as plain HTTP. Defaults to on (matches Herd's `.test` UX).
+        #[arg(long)]
+        no_secure: bool,
+    },
+
+    /// Remove the Herd proxy entry for this project.
+    #[command(name = "herd:unlink")]
+    HerdUnlink {
+        /// Domain to remove. Defaults to the current directory name.
+        #[arg(long)]
+        domain: Option<String>,
     },
 
     /// List every route registered by the app.
@@ -259,6 +329,46 @@ enum Commands {
 
     /// Open a REPL with the app context loaded.
     Repl,
+
+    /// Cross-compile this project for one or more targets and stage a
+    /// customer-ready archive (binary + .env.example + README) in
+    /// `target/dist/`. The single-binary distribution path: hand the archive
+    /// to a customer, they edit `.env`, run the binary.
+    Package {
+        /// Target triple(s) or alias(es): `linux`, `macos`, `windows`, or a
+        /// full triple like `x86_64-pc-windows-msvc`. Repeatable.
+        #[arg(long)]
+        target: Vec<String>,
+
+        /// Build for every triple shipped by the release workflow.
+        #[arg(long, conflicts_with_all = ["target", "current"])]
+        all: bool,
+
+        /// Build only for the host triple (no cross-compilation).
+        #[arg(long, conflicts_with_all = ["target", "all"])]
+        current: bool,
+
+        /// Cargo features to enable (comma-separated, repeatable).
+        #[arg(long, value_delimiter = ',')]
+        features: Vec<String>,
+
+        /// Pass `--no-default-features` to cargo.
+        #[arg(long)]
+        no_default_features: bool,
+
+        /// Skip enabling the framework-side `anvilforge-core/embed-assets`
+        /// feature. Use this if your project doesn't expose it (the customer
+        /// will then need the `resources/` and `public/` folders alongside
+        /// the binary, defeating the single-file model).
+        #[arg(long)]
+        no_embed: bool,
+
+        /// Don't try to use `cross` for cross-compilation — fall through to
+        /// `cargo` directly. Useful when you've already set up a custom
+        /// cross toolchain.
+        #[arg(long)]
+        skip_cross: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -271,7 +381,13 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::New { name } => commands::new::run(&name),
+        Commands::New { name, tiny, db } => {
+            if tiny {
+                commands::new::run_tiny(&name)
+            } else {
+                commands::new::run(&name, db.as_deref())
+            }
+        }
         Commands::MakeModel {
             name,
             with_migration,
@@ -287,6 +403,11 @@ fn main() -> Result<()> {
         Commands::MakeSeeder { name } => commands::make::seeder(&name),
         Commands::MakeFactory { name, model } => commands::make::factory(&name, model.as_deref()),
         Commands::MakeComponent { name } => commands::make::component(&name),
+        Commands::MakeMail { name } => commands::make::mail(&name),
+        Commands::MakeNotification { name } => commands::make::notification(&name),
+        Commands::MakePolicy { name, model } => commands::make::policy(&name, model.as_deref()),
+        Commands::MakeRule { name } => commands::make::rule(&name),
+        Commands::MakeResource { name } => commands::make::resource_serializer(&name),
         Commands::MakeAuth => commands::auth::scaffold(),
         Commands::Migrate {
             step,
@@ -311,10 +432,16 @@ fn main() -> Result<()> {
                 commands::dev::run(&addr)
             }
         }
-        Commands::Doctor => commands::doctor::run(),
+        Commands::Tune => commands::doctor::run(),
         Commands::Fmt { check } => commands::fmt::run(check),
         Commands::Lint { fix } => commands::lint::run(fix),
         Commands::Install { force } => commands::install::run(force),
+        Commands::HerdLink {
+            domain,
+            port,
+            no_secure,
+        } => commands::herd::link(domain, port, !no_secure),
+        Commands::HerdUnlink { domain } => commands::herd::unlink(domain),
         Commands::Routes {
             method,
             prefix,
@@ -334,5 +461,22 @@ fn main() -> Result<()> {
         Commands::ScheduleRun => commands::schedule::run_once(),
         Commands::Test { args } => commands::test::run(&args),
         Commands::Repl => commands::repl::run(),
+        Commands::Package {
+            target,
+            all,
+            current,
+            features,
+            no_default_features,
+            no_embed,
+            skip_cross,
+        } => commands::package::run(
+            target,
+            all,
+            current,
+            features,
+            no_default_features,
+            !no_embed,
+            skip_cross,
+        ),
     }
 }

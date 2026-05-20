@@ -41,6 +41,8 @@ rand = { workspace = true }
 inventory = { workspace = true }
 parking_lot = { workspace = true }
 once_cell = { workspace = true }
+moka = { workspace = true }
+flate2 = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
@@ -53,6 +55,11 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 criterion = { workspace = true }
 tempfile = "3.10"
+sqlx = { workspace = true }
+anvilforge-cast-core = { workspace = true }
+tower = { workspace = true }
+http-body-util = { workspace = true }
+uuid = { workspace = true }
 
 [[bench]]
 name = "snapshot"

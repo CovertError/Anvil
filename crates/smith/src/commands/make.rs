@@ -228,6 +228,53 @@ pub fn component(name: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn mail(name: &str) -> Result<()> {
+    let path = project_root().join(format!("app/Mail/{name}.rs"));
+    write_template(&path, MAIL_TEMPLATE, json!({ "name": name }))?;
+    println!("created {}", path.display());
+    Ok(())
+}
+
+pub fn notification(name: &str) -> Result<()> {
+    let path = project_root().join(format!("app/Notifications/{name}.rs"));
+    write_template(&path, NOTIFICATION_TEMPLATE, json!({ "name": name }))?;
+    println!("created {}", path.display());
+    Ok(())
+}
+
+pub fn policy(name: &str, model: Option<&str>) -> Result<()> {
+    // Infer model from policy name: PostPolicy → Post (default).
+    let model_name = model.unwrap_or_else(|| name.strip_suffix("Policy").unwrap_or(name));
+    let path = project_root().join(format!("app/Policies/{name}.rs"));
+    write_template(
+        &path,
+        POLICY_TEMPLATE,
+        json!({ "name": name, "model": model_name }),
+    )?;
+    println!("created {}", path.display());
+    Ok(())
+}
+
+pub fn rule(name: &str) -> Result<()> {
+    let path = project_root().join(format!("app/Rules/{name}.rs"));
+    write_template(&path, RULE_TEMPLATE, json!({ "name": name }))?;
+    println!("created {}", path.display());
+    Ok(())
+}
+
+pub fn resource_serializer(name: &str) -> Result<()> {
+    // Infer model from resource name: PostResource → Post (default).
+    let model_name = name.strip_suffix("Resource").unwrap_or(name);
+    let path = project_root().join(format!("app/Http/Resources/{name}.rs"));
+    write_template(
+        &path,
+        RESOURCE_TEMPLATE,
+        json!({ "name": name, "model": model_name }),
+    )?;
+    println!("created {}", path.display());
+    Ok(())
+}
+
 pub fn factory(name: &str, model: Option<&str>) -> Result<()> {
     // Infer model from factory name: PostFactory → Post (default).
     let model_name = model.unwrap_or_else(|| name.strip_suffix("Factory").unwrap_or(name));
@@ -576,6 +623,158 @@ impl PersistentFactory<{{model}}> for {{name}} {
         //   .fetch_one(_c.pool()).await.map_err(Error::Database)?;
         //   Ok({{model}} { id: row.0, .._model })
         Ok(_model)
+    }
+}
+"#;
+
+// ─── Laravel-parity scaffolders (mail / notification / policy / rule / resource) ───
+
+const MAIL_TEMPLATE: &str = r#"//! {{name}} — a Mailable. Laravel parity: `Mail::to($user)->send(new {{name}}($args))`.
+
+use anvilforge::prelude::*;
+use anvilforge::mail::{Mailable, OutgoingMessage};
+
+pub struct {{name}} {
+    // TODO: typed fields the template / subject need.
+    // pub order: Order,
+}
+
+impl Mailable for {{name}} {
+    fn build(&self, message: &mut OutgoingMessage) {
+        message
+            .subject("TODO: subject")
+            .view("mail.{{name}}", serde_json::json!({
+                // "order": self.order,
+            }));
+    }
+}
+
+// To send:
+//   c.mailer().to(&user).send({{name}} { /* ... */ }).await?;
+"#;
+
+const NOTIFICATION_TEMPLATE: &str = r#"//! {{name}} — a multi-channel Notification (mail + database + broadcast).
+
+use anvilforge::prelude::*;
+use anvilforge::notification::{Notification, NotificationChannel, NotifiablePayload};
+
+pub struct {{name}} {
+    // TODO: typed fields. The same struct serves every channel.
+}
+
+impl Notification for {{name}} {
+    fn via(&self) -> Vec<NotificationChannel> {
+        // Pick the channels this notification is sent over.
+        vec![NotificationChannel::Mail]
+    }
+
+    fn to_mail(&self) -> NotifiablePayload {
+        NotifiablePayload::mail("TODO: subject", "mail.{{name}}", serde_json::json!({}))
+    }
+
+    fn to_database(&self) -> NotifiablePayload {
+        NotifiablePayload::database(serde_json::json!({}))
+    }
+}
+
+// To send:
+//   c.notify(&users, {{name}} { /* ... */ }).await?;
+"#;
+
+const POLICY_TEMPLATE: &str = r#"//! {{name}} — authorization policy for `{{model}}`.
+//! Laravel parity: `class {{name}} { public function view(User $u, {{model}} $m) { ... } }`.
+
+use anvilforge::prelude::*;
+use crate::app::Models::{User, {{model}}};
+
+pub struct {{name}};
+
+impl {{name}} {
+    /// Anyone can list — return true. Restrict by querying inside the controller.
+    pub fn view_any(_user: &User) -> bool {
+        true
+    }
+
+    pub fn view(_user: &User, _resource: &{{model}}) -> bool {
+        // TODO: per-resource visibility rule.
+        true
+    }
+
+    pub fn create(_user: &User) -> bool {
+        // TODO: role check.
+        true
+    }
+
+    pub fn update(_user: &User, _resource: &{{model}}) -> bool {
+        // TODO: ownership check. e.g. _user.id == _resource.author_id
+        false
+    }
+
+    pub fn delete(_user: &User, _resource: &{{model}}) -> bool {
+        false
+    }
+}
+
+// To check inside a controller:
+//   if !{{name}}::update(&user, &resource) {
+//       return Err(Error::forbidden("not yours"));
+//   }
+"#;
+
+const RULE_TEMPLATE: &str = r#"//! {{name}} — custom validation rule.
+//! Laravel parity: `class {{name}} implements Rule { public function passes($attr, $value) { ... } }`.
+//!
+//! Use it on a FormRequest field with `#[garde(custom = "{{name}}::check"))]`,
+//! or call `{{name}}::check(&value)` directly.
+
+use garde::Path;
+
+pub struct {{name}};
+
+impl {{name}} {
+    pub fn check(value: &str, _ctx: &()) -> Result<(), garde::Error> {
+        // TODO: return Err(garde::Error::new("message")) on failure.
+        if value.is_empty() {
+            return Err(garde::Error::new("must not be empty"));
+        }
+        Ok(())
+    }
+}
+
+#[allow(dead_code)]
+fn _example(_p: Path) {}
+"#;
+
+const RESOURCE_TEMPLATE: &str = r#"//! {{name}} — API Resource serializer for `{{model}}`.
+//! Laravel parity: `class {{name}} extends JsonResource { public function toArray($req) { ... } }`.
+//!
+//! Wrap a model instance in this to control the JSON shape sent to clients,
+//! independent of the database column layout.
+
+use anvilforge::prelude::*;
+use serde::Serialize;
+use crate::app::Models::{{model}};
+
+#[derive(Serialize)]
+pub struct {{name}} {
+    pub id: i64,
+    // TODO: the fields you want to expose.
+    // Hide secrets (password_hash, internal flags) by simply not listing them.
+}
+
+impl From<{{model}}> for {{name}} {
+    fn from(m: {{model}}) -> Self {
+        Self {
+            id: m.id,
+            // TODO: map each field from the model.
+        }
+    }
+}
+
+impl {{name}} {
+    /// Convenience for collection endpoints: `Json({{name}}::collection(rows))`.
+    pub fn collection(rows: Vec<{{model}}>) -> Vec<{{name}}> {
+        rows.into_iter().map({{name}}::from).collect()
     }
 }
 "#;

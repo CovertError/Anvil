@@ -15,16 +15,27 @@ smith repl                      # REPL (deferred to v0.2)
 ## Scaffolding
 
 ```bash
-smith make:model Post --with-migration
-smith make:model User name:string email:string:unique  # field hints
-smith make:migration add_published_at_to_posts
-smith make:controller PostController --resource
-smith make:request StorePostRequest
-smith make:job SendWelcomeEmail
-smith make:event UserRegistered
-smith make:listener SendWelcome --event=UserRegistered
-smith make:test post_creation
-smith make:auth                 # complete login/register scaffold (Breeze)
+anvil make:model Post --with-migration
+anvil make:model User name:string email:string:unique  # field hints
+anvil make:migration add_published_at_to_posts
+anvil make:controller PostController --resource
+anvil make:component Counter             # Spark reactive component
+anvil make:request StorePostRequest
+anvil make:job SendWelcomeEmail
+anvil make:event UserRegistered
+anvil make:listener SendWelcome --event=UserRegistered
+anvil make:seeder UserSeeder
+anvil make:factory UserFactory --model=User
+anvil make:test post_creation
+
+# Laravel-parity scaffolders added in 0.4:
+anvil make:mail OrderShipped             # Mailable
+anvil make:notification InvoicePaid      # multi-channel notification
+anvil make:policy PostPolicy --model=Post
+anvil make:rule Uppercase                # custom validation rule
+anvil make:resource PostResource         # API resource serializer
+
+anvil make:auth                          # complete login/register scaffold (Breeze)
 ```
 
 Generated files use handlebars templates that fill in your project's `anvilforge` paths. Add a TODO and run the manual wiring step printed in the output.

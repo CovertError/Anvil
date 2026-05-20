@@ -8,6 +8,7 @@
 //! POC scope: public channels via Axum's `WebSocketUpgrade`. Private and
 //! presence channels land in v1.1 alongside the Spark auth bridge.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -69,6 +70,18 @@ impl BellowsServer {
         });
     }
 
+    /// Number of live subscribers on a channel. Returns 0 if the channel
+    /// has never been published to or subscribed. Exposed for tests and
+    /// for operational dashboards (e.g. a `/bellows/stats` endpoint).
+    pub fn subscriber_count(&self, channel: &str) -> usize {
+        self.inner
+            .channels
+            .read()
+            .get(channel)
+            .map(|tx| tx.receiver_count())
+            .unwrap_or(0)
+    }
+
     pub async fn upgrade(&self, ws: WebSocketUpgrade) -> impl IntoResponse {
         let server = self.clone();
         ws.on_upgrade(move |socket| handle_socket(server, socket))
@@ -81,10 +94,7 @@ enum ClientMessage {
     #[serde(rename = "pusher:subscribe")]
     Subscribe { data: SubscribeData },
     #[serde(rename = "pusher:unsubscribe")]
-    Unsubscribe {
-        #[allow(dead_code)]
-        data: SubscribeData,
-    },
+    Unsubscribe { data: SubscribeData },
 }
 
 #[derive(Debug, Deserialize)]
@@ -116,7 +126,11 @@ async fn handle_socket(server: BellowsServer, mut socket: WebSocket) {
         ))
         .await;
 
-    let mut subscriptions: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+    // Subscriptions are keyed by channel name so explicit `pusher:unsubscribe`
+    // can abort the right task. Dirty disconnect (socket.next() returns
+    // None/Err) drops out of the loop, and the final pass at the bottom of
+    // this function aborts every remaining handle.
+    let mut subscriptions: HashMap<String, tokio::task::JoinHandle<()>> = HashMap::new();
 
     loop {
         tokio::select! {
@@ -128,6 +142,12 @@ async fn handle_socket(server: BellowsServer, mut socket: WebSocket) {
                 };
                 match client_msg {
                     ClientMessage::Subscribe { data } => {
+                        // Idempotent: re-subscribing to the same channel
+                        // aborts the prior task first, so duplicate Subscribes
+                        // don't double-count the receiver.
+                        if let Some(prior) = subscriptions.remove(&data.channel) {
+                            prior.abort();
+                        }
                         let tx_clone = tx.clone();
                         let mut sub_rx = server.channel(&data.channel).subscribe();
                         let channel = data.channel.clone();
@@ -137,15 +157,21 @@ async fn handle_socket(server: BellowsServer, mut socket: WebSocket) {
                             }
                             drop(channel);
                         });
-                        subscriptions.push(handle);
+                        subscriptions.insert(data.channel.clone(), handle);
                         let _ = socket.send(Message::Text(serde_json::to_string(&ServerMessage {
                             event: "pusher_internal:subscription_succeeded",
                             channel: Some(&data.channel),
                             data: serde_json::json!({}),
                         }).unwrap())).await;
                     }
-                    ClientMessage::Unsubscribe { .. } => {
-                        // POC: subscriptions stay live until disconnect.
+                    ClientMessage::Unsubscribe { data } => {
+                        if let Some(handle) = subscriptions.remove(&data.channel) {
+                            handle.abort();
+                            // The aborted task drops its broadcast::Receiver,
+                            // which decrements the channel's subscriber count
+                            // via RAII — no manual bookkeeping needed.
+                            tracing::trace!(channel = %data.channel, "bellows: unsubscribed");
+                        }
                     }
                 }
             }
@@ -162,7 +188,10 @@ async fn handle_socket(server: BellowsServer, mut socket: WebSocket) {
         }
     }
 
-    for h in subscriptions {
+    // Clean up every remaining subscription on disconnect — clean OR dirty.
+    // `JoinHandle::abort` followed by the task dropping its `Receiver` is
+    // what decrements `broadcast::Sender::receiver_count()`.
+    for (_channel, h) in subscriptions.drain() {
         h.abort();
     }
 }

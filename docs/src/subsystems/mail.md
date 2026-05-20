@@ -1,5 +1,11 @@
 # Mail & notifications
 
+Laravel's `Mail::to(...)->send(new Mailable())` translated to Rust. SMTP
+via [`lettre`](https://docs.rs/lettre) with the same configuration shape
+(`MAIL_MAILER`, `MAIL_HOST`, `MAIL_PORT`, `MAIL_FROM_ADDRESS` in `.env`).
+The notification system maps Laravel's multi-channel notifications
+(mail + database + broadcast) onto a `Notify` trait.
+
 ## Sending mail
 
 ```rust

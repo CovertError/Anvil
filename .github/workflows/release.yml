@@ -1,0 +1,91 @@
+name: release
+
+# Builds the `anvil` CLI for every supported platform and uploads tarballs to
+# the GitHub release. After this lands, `cargo binstall anvilforge-cli`
+# (and the curl one-liner in scripts/install.sh) downloads pre-built binaries
+# instead of compiling from source on the user's machine.
+#
+# Trigger: pushing a tag like `v0.3.2` or `v1.0.0`.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed for the release upload
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            cross: false
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            cross: false
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            cross: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross (Linux only)
+        if: matrix.cross == true
+        run: cargo install cross --locked
+
+      - name: Build
+        shell: bash
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }} -p anvilforge-cli
+          else
+            cargo build --release --target ${{ matrix.target }} -p anvilforge-cli
+          fi
+
+      - name: Package (unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          STAGING="anvilforge-cli-v${VERSION}-${{ matrix.target }}"
+          mkdir -p "$STAGING"
+          cp "target/${{ matrix.target }}/release/anvil" "$STAGING/"
+          cp README.md LICENSE "$STAGING/"
+          tar -czf "${STAGING}.tar.gz" "$STAGING"
+          echo "ASSET=${STAGING}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Package (windows)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          STAGING="anvilforge-cli-v${VERSION}-${{ matrix.target }}"
+          mkdir -p "$STAGING"
+          cp "target/${{ matrix.target }}/release/anvil.exe" "$STAGING/"
+          cp README.md LICENSE "$STAGING/"
+          7z a -tzip "${STAGING}.zip" "$STAGING"
+          echo "ASSET=${STAGING}.zip" >> "$GITHUB_ENV"
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ASSET }}

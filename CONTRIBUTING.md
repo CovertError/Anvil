@@ -8,7 +8,8 @@ Anvilforge is in early POC. Contributions, design feedback, and bug reports are 
 git clone https://github.com/anvilforge/anvilforge.git
 cd anvilforge
 
-# Install the smith CLI from this workspace (uses path deps).
+# Install the anvil CLI from this workspace (uses path deps).
+# Crate name is anvilforge-cli; binary name is `anvil`.
 cargo install --path crates/smith
 
 # Verify the workspace compiles and the smoke tests pass.
@@ -16,7 +17,7 @@ cargo build --workspace
 cargo test --workspace
 
 # Scaffold a throwaway app to dogfood the framework.
-smith new /tmp/scratch && cd /tmp/scratch && cargo check
+anvil new /tmp/scratch && cd /tmp/scratch && cargo check
 ```
 
 ## Repo layout

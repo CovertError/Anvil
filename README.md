@@ -2,159 +2,37 @@
 
 > Web artisans, forged in Rust.
 
-Laravel's developer experience, Rust's runtime characteristics. Same `anvil make:model` muscle memory, type-checked end to end, single static binary.
+Laravel's developer experience, Rust's runtime. Same `anvil make:model` muscle memory, type-checked end to end, single static binary. Coming from Laravel? [Here's the cheatsheet](docs/src/getting-started/from-laravel.md).
 
-## Install
-
-One-time install of the `anvil` CLI (Anvilforge's equivalent of `artisan`):
+## Quickstart
 
 ```bash
-# From crates.io (once published):
-cargo install anvilforge-cli
+# one-time install (pre-built binary, no compile)
+curl -sSf https://anvilforge.dev/install.sh | sh
+# or, if you prefer the slower-but-Rust-native path:
+#   cargo binstall anvilforge-cli       # downloads the release binary
+#   cargo install   anvilforge-cli      # compiles from source (5–15 min on cold toolchain)
 
-# From this workspace (during framework development):
-cargo install --path crates/smith
-```
-
-Verify:
-
-```bash
-anvil --version
-anvil --help
-```
-
-### No-install dev workflow
-
-During framework development you can skip the install and use either the
-shipped shell wrapper or the cargo alias:
-
-```bash
-./bin/anvil <command>        # shell wrapper
-cargo a <command>            # cargo alias (`cargo a bench`, `cargo a serve`, …)
-```
-
-### Speeding up the dev loop
-
-Rust's default compile times aren't a law of nature — they're a config choice.
-Anvilforge ships with conservative defaults that work on every machine, plus
-documented opt-ins for big wins. Run `anvil doctor` to see what's installed.
-
-| What you edit | Recompile needed? | Time |
-|---|---|---|
-| `.forge.html` (any template) | **No** — hot-reloaded per request when `APP_ENV != production` | 0s |
-| `config/anvil.toml` | **No** — read on next request | 0s |
-| Static asset under `public/` | **No** | 0s |
-| Rust source (`src/`, `app/`, `routes/`) | Yes — `anvil dev` restarts on save | 2-15s with tuning |
-
-Stack these tools (`anvil doctor` checks each one):
-
-```bash
-cargo install cargo-watch         # auto-rebuild on save  ─┐
-cargo install cargo-nextest        # 30% faster `cargo test` │ huge dev
-cargo install sccache --locked     # cross-project compile cache  │ loop
-brew install llvm                  # lld linker (macOS)      │ wins
-sudo apt install mold              # mold linker (Linux)    ─┘
-
-# Maximum speed: 2-3× faster rustc in dev (nightly required)
-rustup toolchain install nightly
-rustup component add rustc-codegen-cranelift-preview --toolchain nightly
-anvil dev --fast                   # opts into the Cranelift backend
-```
-
-After enabling these, edit-to-running-code is typically **2-5 seconds**
-for Rust changes, **0 seconds** for template/config changes.
-
-### Sub-second hot-reload — `anvil dev --hot`
-
-For the tightest possible inner loop, Anvilforge ships a **dylib hot-patch
-pattern** with single-command orchestration. Same technique Bevy and Dioxus use:
-split the app into a thin host binary + a `dylib` crate for handlers; the host
-loads symbols at runtime and swaps them when the dylib rebuilds. Framework state
-(DB pools, sessions, Spark snapshots, WebSocket subscribers) persists across
-reloads.
-
-```bash
-anvil dev --hot              # one command, no external tools, no cargo-watch
-```
-
-Auto-detects a sibling `*-handlers` crate, starts a built-in source watcher,
-builds the dylib once, launches the host. Edit any file in the dylib, save,
-the watcher rebuilds in 400-1000ms, the host swaps symbols in <100ms.
-
-Measured on this machine (Apple Silicon), [examples/hot-demo](examples/hot-demo):
-
-```text
-$ anvil dev --hot
-  hot-reload target:
-    dylib:  hot-demo-handlers
-    host:   hot-demo
-  [reload] rebuilding hot-demo-handlers…
-  [reload] ✓ hot-demo-handlers rebuilt in 409ms — host swaps in <100ms
-```
-
-**Edit-to-running-code: ~460ms total**, matching or beating Laravel's
-opcache-reset cycle. The pattern works on stable Rust — just `crate-type =
-["dylib", "rlib"]` on your handlers crate. The [anvilforge-dev](crates/anvil-dev)
-crate provides a typed `RouteSink` ABI so handlers stay type-checked across
-the dylib boundary instead of needing raw `#[no_mangle]` strings.
-
-#### What's preserved across reloads
-
-| State | Survives reload |
-|---|---|
-| DB connection pool | ✓ (in framework Container) |
-| Spark snapshots / sessions | ✓ |
-| WebSocket subscribers (Bellows) | ✓ |
-| In-memory cache (Moka) | ✓ |
-| Static handler state (`lazy_static` in the dylib) | ✗ — moves to dylib reset |
-| `Arc<AtomicU64>` etc. in the host binary | ✓ |
-
-#### Remaining hard limits
-
-- **ABI changes need a full restart.** Adding a parameter to a registered route
-  changes the symbol signature; the next reload will fail to bind. The watcher
-  prints a clear error and you Ctrl-C to relaunch. Function-body edits with
-  unchanged signatures: hot. Signature changes: cold.
-- **Debuggers may lose breakpoint state across reloads.** LLDB/GDB can re-bind
-  symbols by re-attaching after each rebuild; full transparency requires CDB
-  on Windows or `lldb` + `breakpoint set --auto-continue 0`. Documented in
-  CONTRIBUTING.md.
-- **Dylib-internal `static`/`lazy_static` resets.** Keep persistent state in
-  the framework Container or in the host binary's own statics.
-
-#### Default dev workflow (no hot-patch)
-
-For apps that don't want the split-crate structure, the default `anvil dev`
-still gives:
-
-- **0s** template / config / static asset reload
-- **1-2s** Rust handler rebuild + restart (one leaf crate, with the new
-  `[profile.dev]` tuning)
-
-That's already at parity with Laravel for everything except the Rust file
-edit. `anvil dev --hot` closes that last gap.
-
-## Create a new app
-
-Same shape as `laravel new my-app`:
-
-```bash
 anvil new my-app
 cd my-app
-cp .env.example .env
-# edit DATABASE_URL to point at your Postgres
-anvil migrate
 anvil serve
 ```
 
-Open <http://localhost:8080>.
+Open <http://localhost:8080>. That's it. No `.env` to copy, no `DATABASE_URL` to configure — `anvil new` writes `.env` for you with a fresh `APP_KEY`, creates the SQLite DB file on disk, and SQLite is the default (zero-config, just like `laravel new`).
 
-That's it. You now have a working web app with:
+Already running Postgres or MySQL (e.g. via Laravel Herd)? Skip the `.env` edit:
 
-- Routing (`src/routes/web.rs`, `src/routes/api.rs`)
+```bash
+anvil new my-app --db postgres        # creates the `my_app` DB on 127.0.0.1:5432 (Herd defaults)
+anvil new my-app --db mysql           # 127.0.0.1:3306
+anvil new my-app --db postgres://user:pass@host:5432/custom_db   # full URL works too
+```
+
+What you got:
+
+- Routing (`routes/web.rs`, `routes/api.rs`)
 - A Forge layout + welcome page
-- A `users` migration
-- A `User` model with typed columns
+- A `users` migration + `User` model
 - The full Anvilforge container (db pool, cache, mailer, queue, storage)
 - File-watching hot reload via `anvil dev`
 
@@ -179,11 +57,12 @@ anvil bench:full                  # both, in sequence
 anvil fmt                         # cargo fmt --all
 anvil lint                        # cargo clippy --workspace --all-targets
 anvil install                     # `cargo install` this CLI into ~/.cargo/bin
-anvil doctor                      # diagnose + recommend dev-loop speedups
-anvil dev --fast                  # use Cranelift codegen backend (nightly Rust)
 
 anvil mcp                         # start the Boost MCP server (AI agents)
 anvil boost:install               # write AGENTS.md + .mcp.json
+
+anvil herd:link                   # macOS: front the app at https://<dir>.test via Laravel Herd
+anvil herd:unlink                 # remove the Herd proxy
 
 anvil make:model Post --with-migration
 anvil make:migration add_published_at_to_posts
@@ -215,6 +94,28 @@ The framework is one logical project, split into multiple crates published under
 | `anvilforge-test`              | `anvil_test` | Test client, factories |
 
 In practice you only ever depend on `anvilforge` — the facade re-exports everything you need via `anvilforge::prelude::*`.
+
+## Tuning the dev loop
+
+The default `anvil dev` already matches Laravel for everything except the
+Rust file edit:
+
+- **0s** — template (`.forge.html`), config (`config/anvil.toml`), or static
+  asset edit. Hot-reloaded per request when `APP_ENV != production`.
+- **1–2 s** — Rust handler rebuild + restart, with the workspace's tuned
+  `[profile.dev]`.
+
+For sub-second Rust iteration on stable Rust, opt into the dylib hot-patch
+pattern (same technique Bevy and Dioxus use):
+
+```bash
+anvil dev --hot              # ~460 ms edit-to-running-code
+```
+
+The full dev-loop tuning guide — `sccache`, `mold`/`lld`, the Cranelift
+codegen backend, and the hot-patch ABI limits — lives in
+[docs: tuning the dev loop](docs/src/getting-started/dev-loop.md). Run
+`anvil doctor` to see what's already installed locally.
 
 ## Status
 

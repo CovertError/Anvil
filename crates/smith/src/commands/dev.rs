@@ -41,6 +41,14 @@ fn run_with(addr: &str, fast: bool, hot: bool) -> Result<()> {
         std::env::set_var("ANVIL_HOT", "1");
     }
 
+    // One-time speedup-tool check. Detects missing sccache/cargo-watch
+    // on the first `anvil dev`, prompts to install, persists a marker so
+    // subsequent runs don't ask. Replaces "go read `anvil tune` output"
+    // as the first-day path. Bypass with ANVIL_SKIP_TUNE=1.
+    if std::env::var("ANVIL_SKIP_TUNE").is_err() {
+        let _ = maybe_offer_speedup_install();
+    }
+
     println!("───────────────────────────────────────────────────────────────");
     println!("  anvil dev  →  {addr}");
     println!("  • templates ({{.forge.html}}) hot-reload per request (no rebuild)");
@@ -328,5 +336,148 @@ fn single_run(fast: bool) -> Result<()> {
     if !status.success() {
         anyhow::bail!("server exited with {status}");
     }
+    Ok(())
+}
+
+/// First-run check for the dev-loop speedup tools (`sccache`,
+/// `cargo-watch`, optionally `mold` on Linux). Prompts to `cargo install`
+/// any that are missing on the first `anvil dev` invocation; writes a
+/// marker to `.anvil/.tune-checked` so subsequent runs stay silent.
+///
+/// Best-effort — errors are swallowed (no point breaking the dev flow if
+/// the prompt fails). Bypass with `ANVIL_SKIP_TUNE=1`.
+fn maybe_offer_speedup_install() -> Result<()> {
+    let marker = PathBuf::from(".anvil/.tune-checked");
+    if marker.exists() {
+        return Ok(());
+    }
+
+    let cargo_watch_missing = !cargo_subcommand_present("watch");
+    let sccache_missing = !binary_present("sccache");
+    #[cfg(target_os = "linux")]
+    let mold_missing = !binary_present("mold");
+    #[cfg(not(target_os = "linux"))]
+    let mold_missing = false;
+
+    if !cargo_watch_missing && !sccache_missing && !mold_missing {
+        // Everything already installed — record and move on.
+        let _ = write_marker(&marker);
+        return Ok(());
+    }
+
+    println!("anvil dev — first-run tune check");
+    println!();
+    println!("  these dev-loop speedups are missing on this machine:");
+    if cargo_watch_missing {
+        println!("    ✗ cargo-watch  (auto-rebuild on save; ~5× faster inner loop)");
+    }
+    if sccache_missing {
+        println!("    ✗ sccache      (cross-project compile cache; ~40% faster rebuilds)");
+    }
+    if mold_missing {
+        println!("    ✗ mold linker  (3-10× faster linking on Linux)");
+    }
+    println!();
+
+    let install_cmds: Vec<&str> = [
+        cargo_watch_missing.then_some("cargo install cargo-watch"),
+        sccache_missing.then_some("cargo install sccache --locked"),
+        mold_missing.then_some(
+            #[cfg(target_os = "linux")]
+            "sudo apt install mold",
+            #[cfg(not(target_os = "linux"))]
+            "",
+        ),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|s| !s.is_empty())
+    .collect();
+
+    // `inquire::Confirm` is interactive — if stdin isn't a tty (CI,
+    // non-interactive shell), skip the prompt and just print the hint.
+    let interactive = atty_stdin();
+    let install = if interactive {
+        inquire::Confirm::new("install the missing tools now?")
+            .with_default(false)
+            .with_help_message("press y to run the install commands; n to keep current setup (we'll stop asking)")
+            .prompt()
+            .unwrap_or(false)
+    } else {
+        false
+    };
+
+    if install {
+        for cmd in &install_cmds {
+            println!("  → {cmd}");
+            // For sudo commands, defer to the user — running sudo in a
+            // child non-interactively is asking for trouble.
+            if cmd.starts_with("sudo ") {
+                println!("    (run this yourself; we don't sudo on your behalf)");
+                continue;
+            }
+            let mut parts = cmd.split_whitespace();
+            let prog = parts.next().unwrap_or("");
+            let args: Vec<&str> = parts.collect();
+            let status = Command::new(prog).args(&args).status();
+            match status {
+                Ok(s) if s.success() => println!("    ✓ done"),
+                Ok(s) => println!("    ✗ exited with {s}"),
+                Err(e) => println!("    ✗ failed to spawn: {e}"),
+            }
+        }
+    } else {
+        println!("  skipping. Install later with `anvil tune` or:");
+        for cmd in &install_cmds {
+            println!("    {cmd}");
+        }
+    }
+
+    let _ = write_marker(&marker);
+    println!();
+    Ok(())
+}
+
+fn cargo_subcommand_present(name: &str) -> bool {
+    Command::new("cargo")
+        .args(["--list"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.trim().starts_with(name)))
+        .unwrap_or(false)
+}
+
+fn binary_present(name: &str) -> bool {
+    Command::new(name)
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+fn atty_stdin() -> bool {
+    // Cheap heuristic without adding the `atty` crate as a dep — `TERM`
+    // is set in interactive shells and unset (or "dumb") in most CI.
+    matches!(std::env::var("TERM").ok().as_deref(), Some(t) if !t.is_empty() && t != "dumb")
+        && std::env::var("CI").is_err()
+}
+
+fn write_marker(path: &Path) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(
+        path,
+        format!(
+            "checked-at={}\n",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0)
+        ),
+    )?;
     Ok(())
 }

@@ -1,6 +1,6 @@
 # Queues
 
-Anvilforge queues are async, durable, retryable background jobs. The default driver is Postgres-backed (using `SELECT … FOR UPDATE SKIP LOCKED` for safe concurrent consumers).
+Anvilforge queues map onto Laravel's queue system — `Job` traits, `dispatch()`, retries, a `failed_jobs` table, `anvil queue:work` for the worker process. Same mental model, statically typed payloads. The default driver is Postgres (using `SELECT … FOR UPDATE SKIP LOCKED` for safe concurrent consumers), with SQLite supported for local development.
 
 ## Define a job
 

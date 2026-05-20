@@ -1,0 +1,113 @@
+name: bench-x86
+
+# Runs the `anvil-bench` HTTP load tester against the production-shaped
+# Compose stack (Anvil + Postgres + Redis) on a x86_64 GitHub runner. On
+# push to `main`, the latest results are written to `BENCHMARKS.md` at the
+# repo root so the public methodology page can link to live numbers
+# instead of hedging with "your-mileage-may-vary."
+#
+# Triggers:
+#  - push to main → measure + update BENCHMARKS.md
+#  - manual dispatch → measure + upload as a CI artifact only
+#  - pull_request → measure + upload artifact (regression early warning)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'tools/http-bench/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/bench-x86.yml'
+  pull_request:
+    paths:
+      - 'crates/**'
+      - 'tools/http-bench/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # for the BENCHMARKS.md commit on main
+
+jobs:
+  bench:
+    name: x86 sweep (linux/amd64, Postgres in loop)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute machine fingerprint
+        id: fingerprint
+        run: |
+          echo "kernel=$(uname -srvm)" >> "$GITHUB_OUTPUT"
+          echo "cores=$(nproc)" >> "$GITHUB_OUTPUT"
+          echo "memory_mb=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)" >> "$GITHUB_OUTPUT"
+          echo "commit=${GITHUB_SHA:0:12}" >> "$GITHUB_OUTPUT"
+          echo "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Run sweep (Compose stack)
+        id: bench
+        run: |
+          set -euxo pipefail
+          # Build + run the bench against postgres-in-the-loop. The bench
+          # container prints CSV to stdout in sweep mode.
+          docker compose \
+            -f tools/http-bench/docker-compose.yml \
+            up --build --abort-on-container-exit --exit-code-from bench \
+            bench 2>&1 | tee bench-output.txt
+          # Extract just the CSV rows (skip preamble + per-endpoint headers
+          # printed before the data).
+          awk '/^endpoint,concurrency,rps,/{flag=1} flag' bench-output.txt > sweep.csv
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-x86-${{ steps.fingerprint.outputs.commit }}
+          path: |
+            bench-output.txt
+            sweep.csv
+
+      - name: Update BENCHMARKS.md (main only)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          KERNEL: ${{ steps.fingerprint.outputs.kernel }}
+          CORES: ${{ steps.fingerprint.outputs.cores }}
+          MEM:   ${{ steps.fingerprint.outputs.memory_mb }}
+          COMMIT: ${{ steps.fingerprint.outputs.commit }}
+          TS:    ${{ steps.fingerprint.outputs.ts }}
+        run: |
+          set -euo pipefail
+          {
+            echo "# Anvilforge benchmarks (x86 / Postgres in loop)"
+            echo
+            echo "Automatically refreshed by [.github/workflows/bench-x86.yml](.github/workflows/bench-x86.yml) on every push to \`main\`."
+            echo
+            echo "## Machine"
+            echo
+            echo "- Commit: \`$COMMIT\`"
+            echo "- When:   $TS"
+            echo "- Kernel: \`$KERNEL\`"
+            echo "- Cores:  $CORES"
+            echo "- Memory: ${MEM} MB"
+            echo "- Runner: GitHub Actions \`ubuntu-latest\`"
+            echo
+            echo "## Sweep — \`/db-row\` against the \`anvilforge-bench\` Compose stack"
+            echo
+            echo "Each row is a separate run at the listed concurrency, 10s of measurement after a 1s warmup. The CSV header is the bench tool's own; \`p999_us\` is p99.9 in microseconds."
+            echo
+            echo '```csv'
+            cat sweep.csv
+            echo '```'
+            echo
+            echo "Full methodology: [docs/src/production/benchmarks.md](docs/src/production/benchmarks.md)."
+          } > BENCHMARKS.md
+          if ! git diff --quiet BENCHMARKS.md; then
+            git config user.name 'anvilforge-bench-bot'
+            git config user.email 'bench-bot@users.noreply.github.com'
+            git add BENCHMARKS.md
+            git commit -m "ci(bench): refresh x86 numbers ($COMMIT)"
+            git push
+          else
+            echo "BENCHMARKS.md unchanged; skipping commit."
+          fi
