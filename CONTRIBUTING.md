@@ -18,6 +18,11 @@ cargo test --workspace
 
 # Scaffold a throwaway app to dogfood the framework.
 anvil new /tmp/scratch && cd /tmp/scratch && cargo check
+
+# Wire up the pre-push hook so no commit gets pushed unless it would
+# pass CI locally (cargo fmt --check, build, clippy -D warnings, test).
+# Bypass with ANVIL_SKIP_PREFLIGHT=1 git push for emergencies.
+git config core.hooksPath hooks
 ```
 
 ## Repo layout

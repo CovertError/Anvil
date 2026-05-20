@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+#
+# Pre-push hook: runs the exact same gate as .github/workflows/ci.yml so we
+# never push a commit that CI will reject. Mirrors the four steps the CI's
+# "Build & lint" job runs, in the same order, with the same flags.
+#
+# Install once per clone:
+#
+#   git config core.hooksPath hooks
+#
+# Bypass for emergencies (use sparingly — it's exactly the loophole that got
+# us three CI failures on the 0.3.2 release):
+#
+#   ANVIL_SKIP_PREFLIGHT=1 git push    # bypass this hook
+#   git push --no-verify               # bypass all hooks
+#
+set -euo pipefail
+
+if [ "${ANVIL_SKIP_PREFLIGHT:-0}" = "1" ]; then
+  echo "⚠  pre-push: ANVIL_SKIP_PREFLIGHT=1 — skipping CI gate (be sure)"
+  exit 0
+fi
+
+# Cargo prints to stdout/stderr already; just narrate the steps so a failure
+# is obvious in the terminal.
+say() { printf '\n→ pre-push: %s\n' "$1"; }
+fail() { printf '\n✗ pre-push: %s\n   fix this locally and try again, or set ANVIL_SKIP_PREFLIGHT=1 to force\n' "$1" >&2; exit 1; }
+
+say "cargo fmt --all -- --check"
+cargo fmt --all -- --check || fail "formatting drift — run \`cargo fmt --all\` to fix"
+
+say "cargo build --workspace --all-targets"
+cargo build --workspace --all-targets || fail "workspace build failed"
+
+say "cargo clippy --workspace --all-targets -- -D warnings"
+cargo clippy --workspace --all-targets -- -D warnings || fail "clippy is unhappy (CI runs with -D warnings)"
+
+say "cargo test --workspace"
+cargo test --workspace || fail "tests failing"
+
+printf '\n✓ pre-push: gate green — pushing\n'
