@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-05-20
+
+### Laravel Herd integration + auto DB creation on `anvil new`
+
+- **`anvil herd:link` / `anvil herd:unlink`.** On macOS, wires the
+  current project into Laravel Herd's nginx via `herd proxy`, mints
+  a `https://<dir>.test` URL with TLS by default, and patches
+  `APP_URL` + `APP_ADDR` in `.env`. Defaults the bound port to **8081**
+  so it doesn't clash with Herd's bundled Reverb service on 8080.
+  Reads Herd's actual configured TLD via `herd tld`, so it Just Works
+  if you've moved off `.test`. Auto-locates the `herd` binary under
+  `~/Library/Application Support/Herd/bin/` and falls back to PATH.
+- **`anvil new --db <kind|url>`.** New flag accepts `sqlite` (default),
+  `postgres`/`pg`, `mysql`/`mariadb`, or a full URL
+  (`postgres://user:pw@host:5432/dbname`). For non-SQLite kinds, the
+  named DB is provisioned at scaffold time via the local `psql`/`mysql`
+  client (looked up under Herd's bin dir first), so `anvil migrate`
+  can run immediately without a manual `CREATE DATABASE`. "Already
+  exists" is treated as success; missing clients downgrade to a warn
+  with the manual command, never aborting the scaffold.
+- **SQLite file now created at scaffold time.** Previously the
+  `database/anvil.db` file was created lazily on first connect. It now
+  exists on disk as soon as `anvil new` completes, matching the
+  "everything works zero-config" Laravel-installer promise.
+- **`.gitignore` skips `.claude/worktrees/`.** Each Claude Code worktree
+  is a full repo copy; we never want them tracked.
+
 ### "Feel like Laravel" — zero-config first 5 minutes
 
 - **SQLite by default in `anvil new`.** `.env.example` ships with
