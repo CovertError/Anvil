@@ -23,7 +23,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.5"
+version = "0.3.6"
 edition = "2021"
 license = "MIT"
 authors = ["Anvilforge contributors"]
@@ -164,20 +164,20 @@ rust-embed = { version = "8.5", default-features = false, features = ["interpola
 # Internal crates — published names use `anvilforge-*` prefix.
 # Workspace dep keys match published names; [lib].name fields preserve the old
 # import names (`cast`, `forge`, `reverb`, etc.) so internal code is untouched.
-anvilforge = { path = "crates/anvil", version = "0.3.5" }
-anvilforge-core = { path = "crates/anvil-core", version = "0.3.5" }
-anvilforge-derive = { path = "crates/anvil-derive", version = "0.3.5" }
-anvilforge-test = { path = "crates/anvil-test", version = "0.3.5" }
-anvilforge-cast = { path = "crates/cast", version = "0.3.5" }
-anvilforge-cast-core = { path = "crates/cast-core", version = "0.3.5" }
-anvilforge-cast-derive = { path = "crates/cast-derive", version = "0.3.5" }
-anvilforge-templates = { path = "crates/forge", version = "0.3.5" }
-anvilforge-templates-codegen = { path = "crates/forge-codegen", version = "0.3.5" }
-anvilforge-bellows = { path = "crates/bellows", version = "0.3.5" }
-anvilforge-boost = { path = "crates/boost", version = "0.3.5" }
-anvilforge-dev = { path = "crates/anvil-dev", version = "0.3.5" }
-anvilforge-spark = { path = "crates/spark", version = "0.3.5" }
-anvilforge-spark-derive = { path = "crates/spark-derive", version = "0.3.5" }
+anvilforge = { path = "crates/anvil", version = "0.3.6" }
+anvilforge-core = { path = "crates/anvil-core", version = "0.3.6" }
+anvilforge-derive = { path = "crates/anvil-derive", version = "0.3.6" }
+anvilforge-test = { path = "crates/anvil-test", version = "0.3.6" }
+anvilforge-cast = { path = "crates/cast", version = "0.3.6" }
+anvilforge-cast-core = { path = "crates/cast-core", version = "0.3.6" }
+anvilforge-cast-derive = { path = "crates/cast-derive", version = "0.3.6" }
+anvilforge-templates = { path = "crates/forge", version = "0.3.6" }
+anvilforge-templates-codegen = { path = "crates/forge-codegen", version = "0.3.6" }
+anvilforge-bellows = { path = "crates/bellows", version = "0.3.6" }
+anvilforge-boost = { path = "crates/boost", version = "0.3.6" }
+anvilforge-dev = { path = "crates/anvil-dev", version = "0.3.6" }
+anvilforge-spark = { path = "crates/spark", version = "0.3.6" }
+anvilforge-spark-derive = { path = "crates/spark-derive", version = "0.3.6" }
 
 [profile.dev]
 opt-level = 0

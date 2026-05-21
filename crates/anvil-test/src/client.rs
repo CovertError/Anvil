@@ -199,6 +199,12 @@ impl TestClient {
 pub struct TestResponse {
     pub status: StatusCode,
     pub headers: HeaderMap,
+    /// Raw response body bytes — binary-safe. Prefer the [`body_bytes`] /
+    /// [`body_text`] accessors over reading this field directly so test code
+    /// reads symmetric with the other helpers.
+    ///
+    /// [`body_bytes`]: TestResponse::body_bytes
+    /// [`body_text`]: TestResponse::body_text
     pub body: Vec<u8>,
 }
 
@@ -317,8 +323,33 @@ impl TestResponse {
 
     // ─── Body helpers ──────────────────────────────────────────────────────
 
+    /// Raw response body — binary-safe. Use this for CBOR / protobuf /
+    /// msgpack / anything else that isn't UTF-8 text. The [`body_text`]
+    /// accessor lossy-decodes via `String::from_utf8_lossy` and replaces
+    /// invalid sequences with `U+FFFD`, which silently corrupts binary
+    /// payloads and breaks downstream decoders.
+    ///
+    /// [`body_text`]: TestResponse::body_text
+    pub fn body_bytes(&self) -> &[u8] {
+        &self.body
+    }
+
     pub fn body_text(&self) -> String {
         String::from_utf8_lossy(&self.body).to_string()
+    }
+
+    /// Assert the raw body equals `expected` byte-for-byte. Use for binary
+    /// protocols where `assert_body` (UTF-8) would mangle the comparison.
+    pub fn assert_body_bytes(&self, expected: impl AsRef<[u8]>) -> &Self {
+        let expected = expected.as_ref();
+        assert_eq!(
+            self.body.as_slice(),
+            expected,
+            "body byte mismatch — got {} bytes, expected {} bytes",
+            self.body.len(),
+            expected.len()
+        );
+        self
     }
 
     pub fn json<T: DeserializeOwned>(&self) -> T {
@@ -479,6 +510,30 @@ mod tests {
             .await;
         resp.assert_ok();
         assert_eq!(resp.body_text(), "application/x-protobuf");
+    }
+
+    #[tokio::test]
+    async fn body_bytes_preserves_non_utf8_payload() {
+        // Bytes that are not valid UTF-8 — body_text() would replace these
+        // with U+FFFD and silently break a downstream CBOR/protobuf decoder.
+        // body_bytes() must return them verbatim.
+        async fn binary() -> Vec<u8> {
+            vec![0xFF, 0xFE, 0xFD, 0x00, 0x80, 0xC0]
+        }
+        let router = Router::new().route("/bin", axum::routing::get(binary));
+        let client = TestClient::from_router(router);
+
+        let resp = client.get("/bin").await;
+        resp.assert_ok();
+
+        // assert_body_bytes catches the regression directly.
+        resp.assert_body_bytes([0xFF, 0xFE, 0xFD, 0x00, 0x80, 0xC0]);
+        assert_eq!(resp.body_bytes(), &[0xFF, 0xFE, 0xFD, 0x00, 0x80, 0xC0]);
+
+        // body_text() is intentionally lossy — confirm the contrast so future
+        // refactors don't accidentally remove the binary-safe accessor.
+        let text = resp.body_text();
+        assert!(text.contains('\u{FFFD}'), "body_text lossy-decodes");
     }
 
     #[tokio::test]

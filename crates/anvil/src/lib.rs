@@ -72,7 +72,7 @@ pub mod prelude {
     pub use cast::{Pool, Schema};
 
     pub use axum::extract::FromRequest;
-    pub use axum::response::IntoResponse;
+    pub use axum::response::{IntoResponse, Response};
     pub use chrono::{DateTime, Utc};
     pub use serde::{Deserialize, Serialize};
     pub use serde_json::{json as json_macro, Value as JsonValue};

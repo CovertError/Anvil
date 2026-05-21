@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-05-21
+
+### Surfaced while porting `GET /.well-known/sidevers/resolve/:handle`
+
+- **Route registration now panics on axum-0.8 `{name}` path placeholders.**
+  Anvilforge pins axum 0.7, which uses `:name`. Writing `{handle}` (the
+  syntax in current axum docs) used to silently treat the braces as a
+  literal path segment, so every request to `/foo/abc` 404'd with no log
+  hint. `Router::record` (called from `.get` / `.post` / `.put` /
+  `.patch` / `.delete` / `.any`) now scans the path at registration and
+  panics with a copy-paste-able rewrite:
+
+  ```text
+  GET route `/handles/{handle}` uses axum-0.8 syntax `{handle}` but
+  Anvilforge runs on axum 0.7. Use `:handle` instead:
+
+    "/handles/:handle"
+
+  Without this rewrite, requests to that path segment 404 silently.
+  ```
+
+  Caught immediately at `cargo run` / `cargo test`; never reaches a live
+  request. Five tests in `crates/anvil-core/src/route.rs` cover accept,
+  reject, suggestion, and the `{}` / nested-brace edge cases.
+
+- **`TestResponse::body_bytes` + `assert_body_bytes`** — binary-safe
+  body accessors. `body_text()` lossy-decodes via
+  `String::from_utf8_lossy` and replaces invalid sequences with
+  `U+FFFD`, which silently corrupts CBOR / protobuf / msgpack payloads
+  and breaks downstream decoders with cryptic errors. The new
+  accessors return / compare raw `&[u8]`:
+
+  ```rust
+  let resp = client.get("/.well-known/sidevers/resolve/abc").await;
+  resp.assert_ok();
+  let entry: DirectoryEntry = ciborium::de::from_reader(resp.body_bytes())?;
+  // or
+  resp.assert_body_bytes(expected_cbor);
+  ```
+
+  The existing public `body: Vec<u8>` field is now documented as the
+  raw-binary backing store; the new methods are the preferred API.
+  Regression test in `crates/anvil-test/src/client.rs` round-trips a
+  6-byte non-UTF-8 payload and asserts both the binary-safe path and
+  the lossy contrast (so the binary accessor can't be removed by
+  accident later).
+
+- **`axum::response::Response` is now in the prelude.** `IntoResponse`
+  has been there since 0.3.3 but `Response` itself wasn't, so handlers
+  returning `Result<Response, _>` still had to add `axum` as a direct
+  dep. One line: `pub use axum::response::{IntoResponse, Response};`.
+
 ## [0.3.5] - 2026-05-21
 
 ### `load_dotenv()` auto-runs from any `from_env()` constructor

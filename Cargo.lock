@@ -152,7 +152,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "anvilforge-bellows",
  "anvilforge-boost",
@@ -176,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-bellows"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "async-trait",
  "axum",
@@ -198,7 +198,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-boost"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "anvilforge-cast-core",
  "anvilforge-core",
@@ -223,7 +223,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-cast"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "anvilforge-cast-core",
  "anvilforge-cast-derive",
@@ -233,7 +233,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-cast-core"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "async-trait",
  "chrono",
@@ -254,7 +254,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-cast-derive"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -264,7 +264,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-cli"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "anyhow",
  "base64",
@@ -292,7 +292,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-core"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "anvilforge-cast-core",
  "anvilforge-templates",
@@ -354,7 +354,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-derive"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -364,7 +364,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-dev"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "anvilforge-core",
  "axum",
@@ -382,7 +382,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-http-bench"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "anvilforge-cast-core",
  "anvilforge-core",
@@ -405,7 +405,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-spark"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "aes-gcm",
  "anvilforge-bellows",
@@ -445,7 +445,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-spark-derive"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -455,7 +455,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-templates"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "askama",
  "indexmap",
@@ -470,7 +470,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-templates-codegen"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "chumsky",
  "indexmap",
@@ -481,7 +481,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-test"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "anvilforge-core",
  "async-trait",
@@ -863,7 +863,7 @@ dependencies = [
 
 [[package]]
 name = "blog"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "anvilforge",
  "anvilforge-boost",
@@ -2228,7 +2228,7 @@ dependencies = [
 
 [[package]]
 name = "hot-demo"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "axum",
  "hot-demo-handlers",
@@ -2242,7 +2242,7 @@ dependencies = [
 
 [[package]]
 name = "hot-demo-handlers"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "serde",
  "serde_json",

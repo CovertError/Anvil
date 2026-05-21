@@ -55,6 +55,7 @@ impl Router {
     }
 
     fn record(&mut self, method: Method, path: &str) {
+        check_path_syntax(method.as_str(), path);
         self.routes.push(RouteInfo {
             method,
             path: self.full_path(path),
@@ -286,5 +287,78 @@ impl NamedRoutes {
             }
         }
         Some(path)
+    }
+}
+
+/// Reject axum-0.8-style `{name}` path placeholders at route registration.
+/// Anvilforge currently pins axum 0.7, which uses the `:name` syntax — writing
+/// `{handle}` against this version silently becomes a literal path segment,
+/// and every request to `/foo/abc` 404s with no log hint.
+///
+/// Panics with a copy-paste-able rewrite hint. Caught immediately on `cargo
+/// run` / `cargo test`, never reaches a live request.
+fn check_path_syntax(method: &str, path: &str) {
+    for (i, b) in path.bytes().enumerate() {
+        if b != b'{' {
+            continue;
+        }
+        let rest = &path[i + 1..];
+        let Some(end_offset) = rest.find('}') else {
+            continue;
+        };
+        let name = &rest[..end_offset];
+        // Skip empty `{}` and segments containing path-y characters (likely
+        // not a placeholder we want to flag).
+        if name.is_empty() || name.contains('/') {
+            continue;
+        }
+        // Skip Handlebars-style escapes — apps building template strings won't
+        // hit registration with one, but be defensive.
+        if name.starts_with('{') || name.starts_with('#') {
+            continue;
+        }
+        let suggested = path.replacen(&format!("{{{name}}}"), &format!(":{name}"), 1);
+        panic!(
+            "{method} route `{path}` uses axum-0.8 syntax `{{{name}}}` but Anvilforge \
+             runs on axum 0.7. Use `:{name}` instead:\n\n  \"{suggested}\"\n\n\
+             Without this rewrite, requests to that path segment 404 silently."
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_axum_07_colon_syntax() {
+        check_path_syntax("GET", "/handles/:handle");
+        check_path_syntax("GET", "/users/:id/posts/:post_id");
+        check_path_syntax("GET", "/.well-known/sidevers/resolve/:handle");
+    }
+
+    #[test]
+    fn accepts_literal_paths() {
+        check_path_syntax("GET", "/health");
+        check_path_syntax("GET", "/");
+        check_path_syntax("POST", "/handles/claim");
+    }
+
+    #[test]
+    #[should_panic(expected = "uses axum-0.8 syntax `{handle}`")]
+    fn rejects_axum_08_brace_syntax() {
+        check_path_syntax("GET", "/handles/{handle}");
+    }
+
+    #[test]
+    #[should_panic(expected = "Use `:id` instead")]
+    fn suggests_concrete_rewrite() {
+        check_path_syntax("GET", "/users/{id}/posts");
+    }
+
+    #[test]
+    fn ignores_empty_braces() {
+        // `{}` shouldn't trigger a false positive.
+        check_path_syntax("GET", "/foo{}/bar");
     }
 }
