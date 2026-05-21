@@ -52,7 +52,7 @@ pub mod prelude {
     pub use crate::facade::{app as facade_app, cache, config, db, events, mailer, queue, storage};
     pub use crate::middleware::MiddlewareRegistry;
     pub use crate::request::{
-        App, Form, HeaderMap, Json, Method, Path, Query, State, StatusCode, Uri,
+        App, Bytes, Form, HeaderMap, Json, Method, Path, Query, State, StatusCode, Uri,
     };
     pub use crate::response::{json, no_content, Redirect, ViewResponse};
     pub use crate::route::Router;

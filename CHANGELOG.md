@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-05-21
+
+### Surfaced while porting a real protocol endpoint (Sidevers → Anvil)
+
+- **`Bytes` is now in the prelude.** Handlers that take a raw request body
+  (`async fn handler(body: Bytes) -> …`) no longer need to add `axum` as a
+  direct dependency. `axum::body::Bytes` is re-exported alongside `Json` /
+  `Form` / `State`. Reaches users via `use anvilforge::prelude::*;` —
+  same as every other extractor type.
+- **`TestClient::post_bytes` (and `put_bytes` / `patch_bytes`).** Send a
+  raw body with an explicit `Content-Type`. The pre-existing
+  `client.post(path, serde_json::Value)` could only do JSON; anyone
+  testing a CBOR / protobuf / msgpack endpoint had to drop down to hyper
+  or reqwest. Signature mirrors the user's suggestion:
+
+  ```rust
+  let resp = client
+      .post_bytes("/handles/claim", cbor_bytes, "application/cbor")
+      .await;
+  resp.assert_ok();
+  ```
+
+  Takes `impl Into<Bytes>` so `Vec<u8>` / `&'static [u8]` / `Bytes` all
+  work. Three round-trip tests added to `crates/anvil-test/src/client.rs`.
+
 ## [0.3.3] - 2026-05-21
 
 ### Bug-bash fixes

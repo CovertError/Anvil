@@ -7,7 +7,7 @@
 use std::convert::Infallible;
 
 use anvil_core::Application;
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use axum::Router;
 use http::{HeaderMap, Method, Request, StatusCode};
 use http_body_util::BodyExt;
@@ -82,6 +82,57 @@ impl TestClient {
             .method(Method::POST)
             .uri(path)
             .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from(body))
+            .unwrap();
+        self.send(req).await
+    }
+
+    /// Send a raw-bytes POST with an explicit `Content-Type`. Use for binary
+    /// protocol endpoints (CBOR, protobuf, msgpack, etc.) — anything the JSON
+    /// `post()` helper would mangle.
+    pub async fn post_bytes(
+        &self,
+        path: &str,
+        body: impl Into<Bytes>,
+        content_type: &str,
+    ) -> TestResponse {
+        self.bytes_request(Method::POST, path, body.into(), content_type)
+            .await
+    }
+
+    /// `post_bytes` for PUT.
+    pub async fn put_bytes(
+        &self,
+        path: &str,
+        body: impl Into<Bytes>,
+        content_type: &str,
+    ) -> TestResponse {
+        self.bytes_request(Method::PUT, path, body.into(), content_type)
+            .await
+    }
+
+    /// `post_bytes` for PATCH.
+    pub async fn patch_bytes(
+        &self,
+        path: &str,
+        body: impl Into<Bytes>,
+        content_type: &str,
+    ) -> TestResponse {
+        self.bytes_request(Method::PATCH, path, body.into(), content_type)
+            .await
+    }
+
+    async fn bytes_request(
+        &self,
+        method: Method,
+        path: &str,
+        body: Bytes,
+        content_type: &str,
+    ) -> TestResponse {
+        let req = Request::builder()
+            .method(method)
+            .uri(path)
+            .header("content-type", content_type)
             .body(Body::from(body))
             .unwrap();
         self.send(req).await
@@ -374,4 +425,75 @@ fn json_dig(v: &serde_json::Value, path: &str) -> Option<serde_json::Value> {
 // Silence unused-import lint when only used through trait bounds.
 fn _force_link() {
     let _ = std::any::type_name::<Infallible>();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::routing::post;
+
+    /// Echo a raw request body back as the response body. Exercises both the
+    /// prelude-re-exported `Bytes` extractor and the new `post_bytes` client.
+    async fn echo(body: Bytes) -> Bytes {
+        body
+    }
+
+    #[tokio::test]
+    async fn post_bytes_round_trips_arbitrary_bytes() {
+        let router = Router::new().route("/echo", post(echo));
+        let client = TestClient::from_router(router);
+
+        // Real-world payload shape: a 7-byte CBOR map { "ok": true }.
+        let cbor = vec![0xA1, 0x62, 0x6F, 0x6B, 0xF5];
+        let resp = client
+            .post_bytes("/echo", cbor.clone(), "application/cbor")
+            .await;
+
+        resp.assert_ok();
+        assert_eq!(resp.body, cbor);
+    }
+
+    #[tokio::test]
+    async fn post_bytes_sets_content_type_header_for_handler_dispatch() {
+        // Handler that returns `Content-Type` from the request, to prove the
+        // client actually set it correctly.
+        async fn ct(headers: http::HeaderMap) -> String {
+            headers
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("missing")
+                .to_string()
+        }
+        let router = Router::new().route("/ct", post(ct));
+        let client = TestClient::from_router(router);
+
+        let resp = client
+            .post_bytes("/ct", b"x".to_vec(), "application/x-protobuf")
+            .await;
+        resp.assert_ok();
+        assert_eq!(resp.body_text(), "application/x-protobuf");
+    }
+
+    #[tokio::test]
+    async fn put_and_patch_bytes_dispatch_correctly() {
+        async fn method_name(method: Method) -> String {
+            method.as_str().to_string()
+        }
+        let router = Router::new()
+            .route("/m", axum::routing::put(method_name))
+            .route("/m", axum::routing::patch(method_name));
+        let client = TestClient::from_router(router);
+
+        let resp = client
+            .put_bytes("/m", b"_".to_vec(), "application/octet-stream")
+            .await;
+        resp.assert_ok();
+        assert_eq!(resp.body_text(), "PUT");
+
+        let resp = client
+            .patch_bytes("/m", b"_".to_vec(), "application/octet-stream")
+            .await;
+        resp.assert_ok();
+        assert_eq!(resp.body_text(), "PATCH");
+    }
 }

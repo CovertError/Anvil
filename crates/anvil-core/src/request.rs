@@ -1,5 +1,6 @@
 //! Request extras — re-exports and helpers around Axum extractors.
 
+pub use axum::body::Bytes;
 pub use axum::extract::{Form, Json, Path, Query, State};
 pub use axum::http::{HeaderMap, Method, StatusCode, Uri};
 
