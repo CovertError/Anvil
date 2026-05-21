@@ -2,6 +2,13 @@
 
 use std::env;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+/// Cached result of the first `load_dotenv()` call. We do the work exactly
+/// once per process — subsequent calls (from `*Config::from_env()`,
+/// `TestClient::new()`, or main.rs) hand back the cached path without
+/// re-reading the filesystem.
+static DOTENV_LOADED: OnceLock<Option<PathBuf>> = OnceLock::new();
 
 /// Load environment variables from the project's `.env` file.
 ///
@@ -9,11 +16,20 @@ use std::path::{Path, PathBuf};
 /// marker (`config/anvil.toml`, then `Cargo.toml`) and loads `.env` from that
 /// directory only — it does NOT walk further up. This avoids accidentally
 /// picking up a parent project's `.env` when the Anvil project is nested
-/// inside another codebase (e.g., a Laravel root).
+/// inside another codebase.
+///
+/// **Idempotent.** The first call does the work; subsequent calls return the
+/// same cached `Option<PathBuf>`. That's what makes it safe to invoke
+/// implicitly from `*Config::from_env()` — tests get a `.env`-loaded process
+/// even though they never run `main.rs`.
 ///
 /// Returns the path of the `.env` that was loaded, or `None` if no project
 /// root or no `.env` was found. Callers can log this after `tracing_init`.
 pub fn load_dotenv() -> Option<PathBuf> {
+    DOTENV_LOADED.get_or_init(load_dotenv_impl).clone()
+}
+
+fn load_dotenv_impl() -> Option<PathBuf> {
     let cwd = env::current_dir().ok()?;
     let root = find_project_root(&cwd)?;
     let env_path = root.join(".env");
@@ -52,6 +68,7 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn from_env() -> Self {
+        let _ = load_dotenv();
         Self {
             name: env::var("APP_NAME").unwrap_or_else(|_| "Anvil".to_string()),
             env: env::var("APP_ENV").unwrap_or_else(|_| "production".to_string()),
@@ -111,6 +128,7 @@ pub enum ConnectionDriver {
 
 impl DatabaseConfig {
     pub fn from_env() -> Self {
+        let _ = load_dotenv();
         // Allow a comma-separated list of connection names via `DB_CONNECTIONS`.
         // Each connection `foo` reads `DB_FOO_URL`, `DB_FOO_POOL`, `DB_FOO_DRIVER`,
         // and `DB_FOO_READ_URLS` (optional). The "default" connection falls back
@@ -180,6 +198,7 @@ impl DatabaseConfig {
 
 impl ConnectionConfig {
     pub fn from_env(name: &str) -> Self {
+        let _ = load_dotenv();
         let prefix = if name == "default" {
             String::new()
         } else {
@@ -246,6 +265,7 @@ pub struct SessionConfig {
 
 impl SessionConfig {
     pub fn from_env() -> Self {
+        let _ = load_dotenv();
         Self {
             driver: env::var("SESSION_DRIVER").unwrap_or_else(|_| "file".to_string()),
             lifetime_minutes: env::var("SESSION_LIFETIME")
@@ -270,6 +290,7 @@ pub struct CacheConfig {
 
 impl CacheConfig {
     pub fn from_env() -> Self {
+        let _ = load_dotenv();
         Self {
             driver: env::var("CACHE_DRIVER").unwrap_or_else(|_| "moka".to_string()),
             ttl_seconds: env::var("CACHE_TTL")
@@ -288,6 +309,7 @@ pub struct QueueConfig {
 
 impl QueueConfig {
     pub fn from_env() -> Self {
+        let _ = load_dotenv();
         Self {
             driver: env::var("QUEUE_DRIVER").unwrap_or_else(|_| "database".to_string()),
             default_queue: env::var("QUEUE_DEFAULT").unwrap_or_else(|_| "default".to_string()),
@@ -308,6 +330,7 @@ pub struct MailConfig {
 
 impl MailConfig {
     pub fn from_env() -> Self {
+        let _ = load_dotenv();
         Self {
             mailer: env::var("MAIL_MAILER").unwrap_or_else(|_| "smtp".to_string()),
             host: env::var("MAIL_HOST").unwrap_or_else(|_| "localhost".to_string()),
@@ -332,6 +355,7 @@ pub struct FilesystemConfig {
 
 impl FilesystemConfig {
     pub fn from_env() -> Self {
+        let _ = load_dotenv();
         Self {
             default_disk: env::var("FILESYSTEM_DISK").unwrap_or_else(|_| "local".to_string()),
             local_root: env::var("FILESYSTEM_LOCAL_ROOT")
@@ -381,6 +405,18 @@ mod tests {
         fs::create_dir_all(&cwd).unwrap();
         // From anvil/src we should hit anvil/ first (it has both markers).
         assert_eq!(find_project_root(&cwd), Some(anvil.clone()));
+    }
+
+    #[test]
+    fn load_dotenv_is_idempotent_across_calls() {
+        // Hammer it; OnceLock should make every call after the first cheap +
+        // identical. We can't observe "no FS work" directly, but identical
+        // return values across calls is a strong signal.
+        let first = super::load_dotenv();
+        let second = super::load_dotenv();
+        let third = super::load_dotenv();
+        assert_eq!(first, second);
+        assert_eq!(second, third);
     }
 
     #[test]

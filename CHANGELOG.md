@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-05-21
+
+### `load_dotenv()` auto-runs from any `from_env()` constructor
+
+- **Tests now load `.env` automatically.** Previously
+  `DatabaseConfig::from_env()` would silently fall back to
+  `postgres://postgres:postgres@localhost:5432/anvil` in test binaries
+  because tests don't run `main.rs` and never called `load_dotenv()`.
+  The first DB call would then panic with
+  `database "anvil" does not exist`.
+- **The fix.** `load_dotenv()` is now idempotent via `OnceLock` —
+  the first call does the filesystem walk + dotenvy load, every
+  subsequent call returns the cached `Option<PathBuf>` instantly.
+  Every `*Config::from_env()` constructor (`AppConfig`,
+  `DatabaseConfig`, `ConnectionConfig`, `SessionConfig`, `CacheConfig`,
+  `QueueConfig`, `MailConfig`, `FilesystemConfig`) calls it as its
+  first line. `TestClient::new()` and `TestClient::from_router()`
+  also call it as belt-and-braces.
+- **What you need to do.** Nothing. Both
+  `let env_path = anvilforge::config::load_dotenv();` in `main.rs` and
+  `TestClient::new(app).await` in tests Just Work — the function
+  cooperates with itself across the process. Test runs in `0.3.5`
+  pick up `DATABASE_URL` from `.env` without any test-side ceremony.
+
 ## [0.3.4] - 2026-05-21
 
 ### Surfaced while porting a real protocol endpoint (Sidevers → Anvil)

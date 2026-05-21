@@ -21,6 +21,12 @@ pub struct TestClient {
 
 impl TestClient {
     pub async fn new(app: Application) -> Self {
+        // Belt-and-braces: every `*Config::from_env()` already triggers
+        // `load_dotenv()` (idempotent via OnceLock), but a manually-wired
+        // Application that never touches a typed config wouldn't. Forcing it
+        // here means a test binary picks up `.env` even though it doesn't run
+        // `main.rs` — fixing the "tests silently fall back to defaults" trap.
+        let _ = anvil_core::config::load_dotenv();
         Self {
             router: app.into_router(),
             base_headers: HeaderMap::new(),
@@ -28,6 +34,7 @@ impl TestClient {
     }
 
     pub fn from_router(router: Router) -> Self {
+        let _ = anvil_core::config::load_dotenv();
         Self {
             router,
             base_headers: HeaderMap::new(),
