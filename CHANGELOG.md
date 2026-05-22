@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-05-21
+
+### Closes the three observations deferred from 0.3.7
+
+- **Blade `@{{ }}` escape syntax.** The Forge tokenizer now recognizes
+  `@{{ expr }}` and `@@directive(args)` as literal-output escapes,
+  matching Laravel Blade's documented behavior. `@{{ handle }}`
+  renders the literal text `{{ handle }}` (useful for embedding
+  Vue/Alpine/Handlebars mustache syntax in a Forge template);
+  `@@if(cond)` renders the literal text `@if(cond)`. Two new tokens
+  (`Token::LiteralExpr`, `Token::LiteralDirective`), driver-aware
+  lowering (`{% raw %}…{% endraw %}` for MiniJinja, string-literal
+  expression for Askama). Six tests in `crates/forge-codegen/src/parser.rs`.
+
+- **Cast `Model::upsert`** — true Postgres `ON CONFLICT … DO UPDATE
+  SET …` atomic upsert. Conflict columns default to the primary key
+  when an empty slice is passed; pass `&["email"]` for natural-key
+  uniques; pass `&["email", "tenant_id"]` for composite uniques. Every
+  non-PK column is `EXCLUDED.col`-merged automatically. The discoverability
+  problem flagged in the original report (scaffold templates leaning on
+  raw `sqlx::query` instead of the existing Eloquent-style write API)
+  is now fixed too: `make:auth`'s `register` controller uses
+  `User { ... }.insert(c.pool())` instead of 3 positional binds.
+  Existing methods (`Model::create`, `instance.save`, `update_or_create`,
+  `first_or_create`, etc.) were already there since 0.1; this release
+  closes the gap by adding the real missing primitive (`upsert`) and
+  surfacing the API in the default scaffold.
+
+- **Spark `Environment` is now process-shared via `OnceLock`.**
+  Replaces per-render `build_env()` (registering `spark_mount`,
+  `spark_scripts`, `vite_render` ~10 µs each) with a single `Lazy<Environment>`
+  that registers once at first access. `@extends`/`@include` now
+  resolve through MiniJinja's `set_loader` callback instead of the
+  manual `scan_references` → `preload_template_tree` walk — fewer
+  allocations, parsed templates cached inside the Environment for
+  subsequent renders. Reload mode (`SPARK_TEMPLATE_RELOAD=true` or
+  non-production `APP_ENV`) still builds a fresh env per call so
+  template edits land without restart. `render_source` continues to
+  build a per-call env because the inline template has to be
+  registered each time. Four tests in `crates/spark/src/template.rs`
+  cover the loader (Some/None), the disk-extends path via `render_source`,
+  and the disk-extends path via `render(view_path)`.
+
 ## [0.3.7] - 2026-05-21
 
 ### Templating + scaffolding gaps from the Sidevers port

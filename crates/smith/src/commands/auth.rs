@@ -304,20 +304,20 @@ impl AuthController {
         session: Session,
         payload: RegisterRequest,
     ) -> Result<Redirect> {
-        let hashed = auth::hash_password(&payload.password)?;
-        let row: (i64,) = sqlx::query_as(
-            "INSERT INTO users (name, email, password) VALUES ($1, $2, $3) RETURNING id",
-        )
-        .bind(&payload.name)
-        .bind(&payload.email)
-        .bind(&hashed)
-        .fetch_one(c.pool())
-        .await
-        .map_err(Error::Database)?;
-        let user = anvilforge::cast::Model::find(c.pool(), row.0)
-            .await
-            .map(|opt: Option<User>| opt.ok_or(Error::NotFound))
-            .map_err(Error::from)??;
+        // Cast Model write API: build a User in memory and `.insert(pool)`.
+        // The PK comes back via `RETURNING id` so `user.id` is set after.
+        // No raw SQL, no positional binds. The full surface is documented
+        // at docs/src/cast/models.md (search "Eloquent-style write API").
+        let user = User {
+            id: 0, // ignored on insert — the derived INSERT excludes the PK
+            name: payload.name,
+            email: payload.email,
+            password: auth::hash_password(&payload.password)?,
+            created_at: None,
+            updated_at: None,
+        }
+        .insert(c.pool())
+        .await?;
         auth::login(&session, &user).await?;
         Ok(Redirect::to("/"))
     }

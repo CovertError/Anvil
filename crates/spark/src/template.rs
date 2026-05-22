@@ -12,7 +12,7 @@
 //! integration apps with non-standard layouts). Set `SPARK_TEMPLATE_RELOAD=true`
 //! to disable caching during development.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use once_cell::sync::Lazy;
@@ -70,68 +70,53 @@ fn template_path(view_path: &str) -> PathBuf {
     p
 }
 
-fn load_and_lower(view_path: &str) -> Result<String> {
-    if !reload_each_request() {
-        if let Some(cached) = CACHE.read().get(view_path) {
-            return Ok(cached.clone());
-        }
-    }
-    let raw: String = if let Some(embedded) = embedded_source(view_path) {
-        embedded.to_string()
-    } else {
-        let path = template_path(view_path);
-        std::fs::read_to_string(&path).map_err(|e| {
-            Error::Template(format!(
-                "failed to read template {}: {e}",
-                display_path(&path)
-            ))
-        })?
-    };
-    // Runtime lowering: spark/sparkScripts directives emit MiniJinja-compatible
-    // function calls (spark_mount / spark_scripts) instead of Askama-flavored
-    // Rust paths. Functions are registered on the Environment in `render`.
-    let lowered = forge_codegen::compile_source_runtime(&raw);
-    if !reload_each_request() {
-        CACHE.write().insert(view_path.to_string(), lowered.clone());
-    }
-    Ok(lowered)
-}
-
 fn display_path(p: &Path) -> String {
     p.display().to_string()
 }
 
+/// Process-wide cached MiniJinja environment for production renders.
+/// Functions (`spark_mount`, `spark_scripts`, `vite_render`) are registered
+/// exactly once, at first access. The set_loader callback handles all
+/// template lookups (including `@extends` / `@include` transitively), and
+/// MiniJinja caches parsed ASTs internally — so the second render of a
+/// given view pays neither lowering nor parsing cost.
+///
+/// In reload mode (dev), [`render`] bypasses this by building a fresh env
+/// each call so template edits land without a process restart.
+static SHARED_ENV: Lazy<minijinja::Environment<'static>> = Lazy::new(build_env);
+
 /// Render a Spark component template with the given JSON state as context.
 ///
-/// Resolves `@extends` and `@include` references by pre-loading every
-/// referenced layout / partial into the MiniJinja environment using the same
-/// `load_and_lower` pipeline as the entry template. Walks the lowered output
-/// transitively, so `page.forge.html → layouts/app.forge.html → layouts/base.forge.html`
-/// all resolve correctly.
+/// Uses the cached process-wide [`SHARED_ENV`] in production for zero
+/// per-call function-registration cost. In reload mode
+/// (`SPARK_TEMPLATE_RELOAD=true` or non-production `APP_ENV`), builds a
+/// fresh env each call so template edits land immediately.
+///
+/// `@extends` / `@include` references resolve via the MiniJinja loader,
+/// which calls back into [`load_for_minijinja`] for each name.
 pub fn render(view_path: &str, state: &serde_json::Value) -> Result<String> {
-    let mut env = build_env();
-    preload_template_tree(&mut env, view_path)?;
-    let tmpl = env
-        .get_template(view_path)
-        .map_err(|e| Error::Template(format!("template lookup `{view_path}`: {e}")))?;
-    tmpl.render(state)
-        .map_err(|e| Error::Template(format!("template render `{view_path}`: {e}")))
+    if reload_each_request() {
+        let env = build_env();
+        let tmpl = env
+            .get_template(view_path)
+            .map_err(|e| Error::Template(format!("template lookup `{view_path}`: {e}")))?;
+        tmpl.render(state)
+            .map_err(|e| Error::Template(format!("template render `{view_path}`: {e}")))
+    } else {
+        let tmpl = SHARED_ENV
+            .get_template(view_path)
+            .map_err(|e| Error::Template(format!("template lookup `{view_path}`: {e}")))?;
+        tmpl.render(state)
+            .map_err(|e| Error::Template(format!("template render `{view_path}`: {e}")))
+    }
 }
 
 /// Render an inline source string (no file lookup) through the same runtime
-/// pipeline: forge-codegen lowering → MiniJinja with spark_mount / spark_scripts
-/// registered. Used by routes that build a page on the fly (e.g. the blog
-/// example's `/spark-demo`). `@extends`/`@include` references inside the inline
-/// source are resolved against the disk views root just like `render()`.
+/// pipeline. `@extends` / `@include` inside the inline source resolve via
+/// the loader against the disk views root, identical to [`render`].
 pub fn render_source(source: &str, ctx: &serde_json::Value) -> Result<String> {
     let lowered = forge_codegen::compile_source_runtime(source);
     let mut env = build_env();
-    // Pull in every layout/partial the inline source references before
-    // registering the entry template itself.
-    let mut loaded: HashSet<String> = HashSet::new();
-    for r in scan_references(&lowered) {
-        preload_one(&mut env, &r, &mut loaded)?;
-    }
     let entry = "__spark_inline__";
     env.add_template_owned(entry.to_string(), lowered)
         .map_err(|e| Error::Template(format!("inline template compile: {e}")))?;
@@ -142,61 +127,46 @@ pub fn render_source(source: &str, ctx: &serde_json::Value) -> Result<String> {
         .map_err(|e| Error::Template(format!("inline template render: {e}")))
 }
 
-/// Add `entry` and every template it transitively `@extends` or `@include`s
-/// into `env`. Idempotent within a single call: each view path is loaded once
-/// even if multiple templates reference it.
-fn preload_template_tree(env: &mut minijinja::Environment<'static>, entry: &str) -> Result<()> {
-    let mut loaded: HashSet<String> = HashSet::new();
-    preload_one(env, entry, &mut loaded)
-}
-
-fn preload_one(
-    env: &mut minijinja::Environment<'static>,
-    view_path: &str,
-    loaded: &mut HashSet<String>,
-) -> Result<()> {
-    if !loaded.insert(view_path.to_string()) {
-        return Ok(());
+/// Loader callback for MiniJinja: returns the lowered source for a view
+/// path, or `Ok(None)` for "not found". MiniJinja calls this on the first
+/// `get_template(name)` for any unknown name, including transitively via
+/// `{% extends "..." %}` and `{% include "..." %}`.
+fn load_for_minijinja(name: &str) -> std::result::Result<Option<String>, minijinja::Error> {
+    // Embedded source path: works without any disk presence (single-binary
+    // distributions). The runtime lowering happens here so the pipeline is
+    // identical to the disk path.
+    if let Some(embedded) = embedded_source(name) {
+        let lowered = forge_codegen::compile_source_runtime(embedded);
+        return Ok(Some(lowered));
     }
-    let lowered = load_and_lower(view_path)?;
-    // Recurse into referenced templates BEFORE adding this one — MiniJinja
-    // doesn't strictly require dependency order, but failing fast on a
-    // missing layout points the error at the right file.
-    for r in scan_references(&lowered) {
-        preload_one(env, &r, loaded)?;
+    // Disk fallback. `Ok(None)` signals "not found" to MiniJinja — it then
+    // raises its standard `TemplateNotFound` error pointing at the name.
+    let path = template_path(name);
+    if !path.exists() {
+        return Ok(None);
     }
-    env.add_template_owned(view_path.to_string(), lowered)
-        .map_err(|e| Error::Template(format!("template compile `{view_path}`: {e}")))?;
-    Ok(())
-}
-
-/// Scan lowered MiniJinja source for `{% extends "..." %}` and
-/// `{% include "..." %}` template references. The lowering layer normalizes
-/// the path (`@extends("layouts.app")` → `{% extends "layouts/app" %}`), so
-/// what we extract here is already the view-path key.
-fn scan_references(lowered: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    for tag in ["extends", "include"] {
-        let open = format!("{{% {tag} \"");
-        let mut cursor = 0;
-        while let Some(i) = lowered[cursor..].find(&open) {
-            let name_start = cursor + i + open.len();
-            if let Some(end) = lowered[name_start..].find('"') {
-                let name = &lowered[name_start..name_start + end];
-                if !name.is_empty() {
-                    out.push(name.to_string());
-                }
-                cursor = name_start + end + 1;
-            } else {
-                break;
-            }
+    // Read + lower. Cache the lowered string for production hot paths.
+    if !reload_each_request() {
+        if let Some(cached) = CACHE.read().get(name) {
+            return Ok(Some(cached.clone()));
         }
     }
-    out
+    let raw = std::fs::read_to_string(&path).map_err(|e| {
+        minijinja::Error::new(
+            minijinja::ErrorKind::TemplateNotFound,
+            format!("read {}: {e}", display_path(&path)),
+        )
+    })?;
+    let lowered = forge_codegen::compile_source_runtime(&raw);
+    if !reload_each_request() {
+        CACHE.write().insert(name.to_string(), lowered.clone());
+    }
+    Ok(Some(lowered))
 }
 
-/// Build a fresh MiniJinja environment pre-loaded with Spark's runtime
-/// functions: `spark_mount(name, props?)` and `spark_scripts()`.
+/// Build a MiniJinja environment with Spark's runtime functions and the
+/// template loader registered. Called once for [`SHARED_ENV`] (production)
+/// and on every render call in reload mode.
 fn build_env() -> minijinja::Environment<'static> {
     use minijinja::value::Rest;
     use minijinja::{Error as MjError, ErrorKind, Value as MjValue};
@@ -262,6 +232,13 @@ fn build_env() -> minijinja::Environment<'static> {
         },
     );
 
+    // Template loader: MiniJinja calls this on the first `get_template(name)`
+    // for any unknown name, including transitively via `@extends` / `@include`.
+    // Parsed templates are cached inside the Environment, so this only fires
+    // once per name per env (and never in cached production renders past the
+    // first one).
+    env.set_loader(load_for_minijinja);
+
     env
 }
 
@@ -275,39 +252,50 @@ mod tests {
     use super::*;
 
     #[test]
-    fn scan_references_finds_extends_and_include() {
-        let src = r#"{% extends "layouts/app" %}
-        {% block content %}
-        {% include "partials/nav" %}
-        {% include "partials/footer" %}
-        {% endblock %}"#;
-        let refs = scan_references(src);
-        assert!(refs.contains(&"layouts/app".to_string()));
-        assert!(refs.contains(&"partials/nav".to_string()));
-        assert!(refs.contains(&"partials/footer".to_string()));
-        assert_eq!(refs.len(), 3);
+    fn loader_returns_none_for_missing_template() {
+        // Point loader at an empty temp dir; ask for a name that doesn't
+        // exist. Must yield Ok(None) so MiniJinja can produce its standard
+        // TemplateNotFound error rather than us erroring at the loader layer.
+        let tmp = tempfile::tempdir().unwrap();
+        unsafe {
+            std::env::set_var("SPARK_VIEWS_DIR", tmp.path());
+        }
+        clear_cache();
+        let result = load_for_minijinja("does/not/exist");
+        unsafe {
+            std::env::remove_var("SPARK_VIEWS_DIR");
+        }
+        assert!(matches!(result, Ok(None)), "got: {result:?}");
     }
 
     #[test]
-    fn scan_references_handles_empty_and_no_refs() {
-        assert!(scan_references("").is_empty());
-        assert!(scan_references("<h1>plain html</h1>").is_empty());
-        assert!(scan_references(r#"{% extends "" %}"#).is_empty());
+    fn loader_returns_some_for_existing_template() {
+        let tmp = tempfile::tempdir().unwrap();
+        let views = tmp.path().join("resources").join("views");
+        std::fs::create_dir_all(&views).unwrap();
+        std::fs::write(views.join("hello.forge.html"), "<h1>hi</h1>").unwrap();
+
+        unsafe {
+            std::env::set_var("SPARK_VIEWS_DIR", &views);
+            std::env::set_var("SPARK_TEMPLATE_RELOAD", "true");
+        }
+        clear_cache();
+
+        let result = load_for_minijinja("hello").unwrap();
+        assert!(result.is_some(), "expected Some, got None");
+        let body = result.unwrap();
+        assert!(body.contains("<h1>hi</h1>"), "body: {body}");
+
+        unsafe {
+            std::env::remove_var("SPARK_VIEWS_DIR");
+            std::env::remove_var("SPARK_TEMPLATE_RELOAD");
+        }
     }
 
     #[test]
-    fn scan_references_ignores_unclosed_quotes() {
-        // Defensive: a half-written template shouldn't cause a panic in the
-        // scanner — just yield whatever refs DID parse cleanly.
-        let refs = scan_references(r#"{% extends "layouts/app" %} {% include "broken"#);
-        assert_eq!(refs, vec!["layouts/app"]);
-    }
-
-    #[test]
-    fn render_source_resolves_extends_via_disk() {
-        // Write a tiny layout + page on disk under a temp views root, then
-        // render an inline source that extends the layout. This exercises
-        // the full preload_template_tree path through render_source().
+    fn render_source_resolves_extends_via_loader() {
+        // End-to-end: inline source extends a disk layout. The loader fires
+        // for "layouts/app" when MiniJinja sees `{% extends "layouts/app" %}`.
         let tmp = tempfile::tempdir().unwrap();
         let views = tmp.path().join("resources").join("views");
         std::fs::create_dir_all(views.join("layouts")).unwrap();
@@ -317,12 +305,6 @@ mod tests {
         )
         .unwrap();
 
-        // Point the renderer at our temp views root. The lock is best-effort:
-        // we set SPARK_VIEWS_DIR, render, then restore. Other tests in this
-        // crate don't share state via this env var.
-        let prev = std::env::var("SPARK_VIEWS_DIR").ok();
-        // SAFETY: tests are serialized via the `--test-threads=1` lock below,
-        // and we restore the previous value before returning.
         unsafe {
             std::env::set_var("SPARK_VIEWS_DIR", &views);
             std::env::set_var("SPARK_TEMPLATE_RELOAD", "true");
@@ -336,11 +318,41 @@ mod tests {
         assert!(out.contains("<html>"), "layout wasn't applied: {out}");
 
         unsafe {
-            if let Some(v) = prev {
-                std::env::set_var("SPARK_VIEWS_DIR", v);
-            } else {
-                std::env::remove_var("SPARK_VIEWS_DIR");
-            }
+            std::env::remove_var("SPARK_VIEWS_DIR");
+            std::env::remove_var("SPARK_TEMPLATE_RELOAD");
+        }
+    }
+
+    #[test]
+    fn render_resolves_extends_via_loader() {
+        // The cousin of render_source_resolves_extends_via_loader, but going
+        // through render(view_path) instead of render_source(inline).
+        let tmp = tempfile::tempdir().unwrap();
+        let views = tmp.path().join("resources").join("views");
+        std::fs::create_dir_all(views.join("layouts")).unwrap();
+        std::fs::write(
+            views.join("layouts").join("app.forge.html"),
+            "<html><body>{% block content %}default{% endblock %}</body></html>",
+        )
+        .unwrap();
+        std::fs::write(
+            views.join("page.forge.html"),
+            r#"{% extends "layouts/app" %}{% block content %}page: {{ slug }}{% endblock %}"#,
+        )
+        .unwrap();
+
+        unsafe {
+            std::env::set_var("SPARK_VIEWS_DIR", &views);
+            std::env::set_var("SPARK_TEMPLATE_RELOAD", "true");
+        }
+        clear_cache();
+
+        let out = render("page", &serde_json::json!({ "slug": "intro" })).unwrap();
+        assert!(out.contains("page: intro"), "got: {out}");
+        assert!(out.contains("<html>"), "layout missing: {out}");
+
+        unsafe {
+            std::env::remove_var("SPARK_VIEWS_DIR");
             std::env::remove_var("SPARK_TEMPLATE_RELOAD");
         }
     }

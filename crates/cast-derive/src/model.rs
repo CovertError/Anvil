@@ -134,6 +134,21 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let insert_sql = format!(
         "INSERT INTO {table_name} ({insert_columns_csv}) VALUES ({insert_placeholders_csv}) RETURNING {pk_column}"
     );
+
+    // upsert_set_excluded_csv: `col1 = EXCLUDED.col1, col2 = EXCLUDED.col2, ...`
+    // for every writable column. Used in `ON CONFLICT ... DO UPDATE SET ...`.
+    let upsert_set_excluded_csv = writable_field_names
+        .iter()
+        .map(|n| format!("{n} = EXCLUDED.{n}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let upsert_set_excluded_csv_lit =
+        syn::LitStr::new(&upsert_set_excluded_csv, struct_name.span());
+    let insert_columns_csv_lit = syn::LitStr::new(&insert_columns_csv, struct_name.span());
+    let insert_placeholders_csv_lit =
+        syn::LitStr::new(&insert_placeholders_csv, struct_name.span());
+    let table_name_lit_str = syn::LitStr::new(&table_name, struct_name.span());
+    let pk_column_lit_str = syn::LitStr::new(&pk_column, struct_name.span());
     let update_sql = format!(
         "UPDATE {table_name} SET {update_set_csv}, updated_at = CURRENT_TIMESTAMP WHERE {pk_column} = ${update_pk_placeholder}"
     );
@@ -389,6 +404,53 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
                     }
                     None => attrs.insert(pool).await,
                 }
+            }
+
+            /// Postgres `ON CONFLICT ... DO UPDATE SET ...` upsert. Inserts
+            /// `attrs`, or — when a row with the supplied unique columns
+            /// already exists — atomically updates every non-PK column to
+            /// the new values (`EXCLUDED.col`). Returns the row's primary
+            /// key with the model populated.
+            ///
+            /// `conflict_cols` is the unique-or-PK constraint to target.
+            /// Empty slice means "primary key" — equivalent to `ON CONFLICT
+            /// (id) DO UPDATE`. For composite uniques (e.g. `(email, tenant_id)`)
+            /// pass `&["email", "tenant_id"]`.
+            ///
+            /// ```ignore
+            /// // Upsert by email (the natural identity for users):
+            /// let user = User::upsert(
+            ///     pool,
+            ///     User { id: 0, email: "a@b.com".into(), name: "Alice".into(), ..Default::default() },
+            ///     &["email"],
+            /// ).await?;
+            /// ```
+            pub async fn upsert(
+                pool: &::anvilforge::cast::sqlx::PgPool,
+                attrs: Self,
+                conflict_cols: &[&str],
+            ) -> ::anvilforge::cast::Result<Self> {
+                let conflict_target = if conflict_cols.is_empty() {
+                    #pk_column_lit_str.to_string()
+                } else {
+                    conflict_cols.join(", ")
+                };
+                let sql = ::std::format!(
+                    "INSERT INTO {} ({}) VALUES ({}) \
+                     ON CONFLICT ({}) DO UPDATE SET {} \
+                     RETURNING {}",
+                    #table_name_lit_str,
+                    #insert_columns_csv_lit,
+                    #insert_placeholders_csv_lit,
+                    conflict_target,
+                    #upsert_set_excluded_csv_lit,
+                    #pk_column_lit_str,
+                );
+                let q = ::anvilforge::cast::sqlx::query_as::<_, (#pk_field_type,)>(&sql);
+                let attrs_ref = &attrs;
+                let q = { let q = q; #(let q = q.bind(&attrs_ref.#writable_field_idents);)* q };
+                let row = q.fetch_one(pool).await?;
+                Ok(Self { #pk_field_ident: row.0, ..attrs })
             }
 
             /// Eloquent's `Model::find_or_fail`: like `find` but returns

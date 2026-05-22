@@ -42,6 +42,37 @@ pub fn lower_with_target(tokens: &[Token], target: LowerTarget) -> String {
                 out.push_str("|safe }}");
             }
 
+            // `@{{ expr }}` → output the literal text `{{ expr }}` without
+            // interpolation. Both Askama and MiniJinja honor `{% raw %}…{% endraw %}`
+            // (MiniJinja calls it `{% raw %}`; Askama calls it `{% raw %}` too as
+            // of askama 0.12). This is the most portable representation.
+            Token::LiteralExpr(expr) => match target {
+                LowerTarget::Askama => {
+                    // Askama: emit a literal string expression.
+                    out.push_str("{{ \"{{ ");
+                    out.push_str(&expr.replace('"', "\\\""));
+                    out.push_str(" }}\"|safe }}");
+                }
+                LowerTarget::MiniJinja => {
+                    out.push_str("{% raw %}{{ ");
+                    out.push_str(expr);
+                    out.push_str(" }}{% endraw %}");
+                }
+            },
+
+            // `@@directive(args)` → output the literal text `@directive(args)`.
+            // Simpler than LiteralExpr because there are no braces for the
+            // template engine to misinterpret — we just emit text.
+            Token::LiteralDirective { name, args } => {
+                out.push('@');
+                out.push_str(name);
+                if let Some(a) = args {
+                    out.push('(');
+                    out.push_str(a);
+                    out.push(')');
+                }
+            }
+
             Token::Directive { name, args } => {
                 let args_inner = args.as_deref().unwrap_or("").trim();
                 let args_stripped_quotes = args_inner.trim_matches(|c| c == '"' || c == '\'');
