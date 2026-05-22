@@ -250,21 +250,62 @@ pub fn clear_cache() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // The tests below mutate process-wide env vars (`SPARK_VIEWS_DIR`,
+    // `SPARK_TEMPLATE_RELOAD`). Parallel test execution would race on those,
+    // so every test grabs this mutex first to serialize against its siblings.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    /// RAII test scope: locks `ENV_LOCK`, sets the env vars for the duration
+    /// of the test, restores the previous values on drop. Keeps env state
+    /// from leaking across tests when run in parallel.
+    struct EnvScope {
+        _guard: std::sync::MutexGuard<'static, ()>,
+        prev_views: Option<String>,
+        prev_reload: Option<String>,
+    }
+
+    impl EnvScope {
+        fn new(views: &Path) -> Self {
+            let guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            let prev_views = std::env::var("SPARK_VIEWS_DIR").ok();
+            let prev_reload = std::env::var("SPARK_TEMPLATE_RELOAD").ok();
+            // SAFETY: we hold ENV_LOCK so no concurrent reader/writer exists.
+            unsafe {
+                std::env::set_var("SPARK_VIEWS_DIR", views);
+                std::env::set_var("SPARK_TEMPLATE_RELOAD", "true");
+            }
+            clear_cache();
+            Self {
+                _guard: guard,
+                prev_views,
+                prev_reload,
+            }
+        }
+    }
+
+    impl Drop for EnvScope {
+        fn drop(&mut self) {
+            // SAFETY: still under ENV_LOCK via `_guard`.
+            unsafe {
+                match &self.prev_views {
+                    Some(v) => std::env::set_var("SPARK_VIEWS_DIR", v),
+                    None => std::env::remove_var("SPARK_VIEWS_DIR"),
+                }
+                match &self.prev_reload {
+                    Some(v) => std::env::set_var("SPARK_TEMPLATE_RELOAD", v),
+                    None => std::env::remove_var("SPARK_TEMPLATE_RELOAD"),
+                }
+            }
+        }
+    }
 
     #[test]
     fn loader_returns_none_for_missing_template() {
-        // Point loader at an empty temp dir; ask for a name that doesn't
-        // exist. Must yield Ok(None) so MiniJinja can produce its standard
-        // TemplateNotFound error rather than us erroring at the loader layer.
         let tmp = tempfile::tempdir().unwrap();
-        unsafe {
-            std::env::set_var("SPARK_VIEWS_DIR", tmp.path());
-        }
-        clear_cache();
+        let _scope = EnvScope::new(tmp.path());
         let result = load_for_minijinja("does/not/exist");
-        unsafe {
-            std::env::remove_var("SPARK_VIEWS_DIR");
-        }
         assert!(matches!(result, Ok(None)), "got: {result:?}");
     }
 
@@ -274,28 +315,15 @@ mod tests {
         let views = tmp.path().join("resources").join("views");
         std::fs::create_dir_all(&views).unwrap();
         std::fs::write(views.join("hello.forge.html"), "<h1>hi</h1>").unwrap();
-
-        unsafe {
-            std::env::set_var("SPARK_VIEWS_DIR", &views);
-            std::env::set_var("SPARK_TEMPLATE_RELOAD", "true");
-        }
-        clear_cache();
+        let _scope = EnvScope::new(&views);
 
         let result = load_for_minijinja("hello").unwrap();
-        assert!(result.is_some(), "expected Some, got None");
-        let body = result.unwrap();
+        let body = result.expect("expected Some, got None");
         assert!(body.contains("<h1>hi</h1>"), "body: {body}");
-
-        unsafe {
-            std::env::remove_var("SPARK_VIEWS_DIR");
-            std::env::remove_var("SPARK_TEMPLATE_RELOAD");
-        }
     }
 
     #[test]
     fn render_source_resolves_extends_via_loader() {
-        // End-to-end: inline source extends a disk layout. The loader fires
-        // for "layouts/app" when MiniJinja sees `{% extends "layouts/app" %}`.
         let tmp = tempfile::tempdir().unwrap();
         let views = tmp.path().join("resources").join("views");
         std::fs::create_dir_all(views.join("layouts")).unwrap();
@@ -304,29 +332,17 @@ mod tests {
             "<html><body>{% block content %}default{% endblock %}</body></html>",
         )
         .unwrap();
-
-        unsafe {
-            std::env::set_var("SPARK_VIEWS_DIR", &views);
-            std::env::set_var("SPARK_TEMPLATE_RELOAD", "true");
-        }
-        clear_cache();
+        let _scope = EnvScope::new(&views);
 
         let inline =
             r#"{% extends "layouts/app" %}{% block content %}hello {{ name }}{% endblock %}"#;
         let out = render_source(inline, &serde_json::json!({ "name": "world" })).unwrap();
         assert!(out.contains("hello world"), "got: {out}");
         assert!(out.contains("<html>"), "layout wasn't applied: {out}");
-
-        unsafe {
-            std::env::remove_var("SPARK_VIEWS_DIR");
-            std::env::remove_var("SPARK_TEMPLATE_RELOAD");
-        }
     }
 
     #[test]
     fn render_resolves_extends_via_loader() {
-        // The cousin of render_source_resolves_extends_via_loader, but going
-        // through render(view_path) instead of render_source(inline).
         let tmp = tempfile::tempdir().unwrap();
         let views = tmp.path().join("resources").join("views");
         std::fs::create_dir_all(views.join("layouts")).unwrap();
@@ -340,20 +356,10 @@ mod tests {
             r#"{% extends "layouts/app" %}{% block content %}page: {{ slug }}{% endblock %}"#,
         )
         .unwrap();
-
-        unsafe {
-            std::env::set_var("SPARK_VIEWS_DIR", &views);
-            std::env::set_var("SPARK_TEMPLATE_RELOAD", "true");
-        }
-        clear_cache();
+        let _scope = EnvScope::new(&views);
 
         let out = render("page", &serde_json::json!({ "slug": "intro" })).unwrap();
         assert!(out.contains("page: intro"), "got: {out}");
         assert!(out.contains("<html>"), "layout missing: {out}");
-
-        unsafe {
-            std::env::remove_var("SPARK_VIEWS_DIR");
-            std::env::remove_var("SPARK_TEMPLATE_RELOAD");
-        }
     }
 }
