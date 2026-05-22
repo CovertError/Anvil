@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-05-21
+
+### Templating + scaffolding gaps from the Sidevers port
+
+- **`make:model` now auto-updates `app/Models/mod.rs`.** Regression
+  from 0.3.3 — the "all 11 generators auto-wire mod.rs" pass missed
+  `model()`. Same `append_to_mod_rs(dir, name)` call the other
+  generators got; idempotent on the file-marker check.
+- **`spark::template::render` resolves `@extends` and `@include`.**
+  Previously only the entry template was added to the MiniJinja env,
+  so `@extends("layouts.app")` blew up with `template "layouts/app" 
+  does not exist`. The renderer now walks the lowered output for
+  `{% extends "..." %}` and `{% include "..." %}` references and
+  pre-loads each via the same `load_and_lower` pipeline. Transitive:
+  a page extending a layout that includes a partial that includes
+  another partial all resolves correctly. Same fix applies to
+  `render_source` for inline templates that extend disk layouts.
+- **`@vite([...])` works under MiniJinja.** Was Askama-only — the
+  emitted SQL ((sic, "Rust") syntax `::forge::vite::render(&[...])`
+  is invalid MiniJinja. Lowered MiniJinja path now emits
+  `{{ vite_render(...)|safe }}` and the `vite_render` function is
+  registered on the Environment in `build_env()`, splatted to a
+  `forge::vite::render(&[&str])` call. Strict about input types —
+  non-string entries error with a clear message at render time
+  instead of silently passing through.
+
+Four new tests in `crates/spark/src/template.rs` cover the
+reference-extracting parser (extends, include, edge cases, defensive
+behaviour on malformed input) and the end-to-end disk-extends path.
+
+### Smaller observations from the report (filed, not in this release)
+
+- **`@{{ var }}` Blade escape syntax.** Forge doesn't honor Blade's
+  literal-output convention; deferred — needs a directive-layer
+  parser change.
+- **Cast ORM insert/update sugar.** Real parity gap. Deferred to a
+  Cast-focused minor — needs a `Model::create` / `instance.save` /
+  `Model::upsert` design that handles the column-list reflection in
+  the derive macro.
+- **`spark::template::render` per-call MiniJinja Environment.** The
+  function registrations (`spark_mount`, `spark_scripts`,
+  `vite_render`) get re-attached on every render. A shared base env
+  + per-render template additions would reclaim the work; deferred
+  because MiniJinja's `Environment` doesn't `Clone` directly and the
+  refactor has to land alongside the cache TTL changes for
+  `SPARK_TEMPLATE_RELOAD`.
+
 ## [0.3.6] - 2026-05-21
 
 ### Surfaced while porting `GET /.well-known/sidevers/resolve/:handle`

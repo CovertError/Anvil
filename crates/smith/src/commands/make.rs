@@ -10,7 +10,8 @@ use serde_json::json;
 use super::project_root;
 
 pub fn model(name: &str, with_migration: bool, fields: &[String]) -> Result<()> {
-    let path = project_root().join(format!("app/Models/{name}.rs"));
+    let dir = "app/Models";
+    let path = project_root().join(format!("{dir}/{name}.rs"));
     let fields_parsed = parse_fields(fields);
     write_template(
         &path,
@@ -22,6 +23,7 @@ pub fn model(name: &str, with_migration: bool, fields: &[String]) -> Result<()> 
         }),
     )?;
     println!("created {}", path.display());
+    append_to_mod_rs(dir, name)?;
 
     if with_migration {
         migration(&format!(

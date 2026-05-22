@@ -282,11 +282,25 @@ pub fn lower_with_target(tokens: &[Token], target: LowerTarget) -> String {
                     "endonce" => out.push_str("<!--FORGE-ONCE-END-->"),
 
                     // ─── Assets ────────────────────────────────────────────
-                    "vite" => {
-                        out.push_str("{{ ::forge::vite::render(&[");
-                        out.push_str(args_inner);
-                        out.push_str("])|safe }}");
-                    }
+                    // @vite(["resources/css/app.css", "resources/js/app.js"])
+                    "vite" => match target {
+                        LowerTarget::Askama => {
+                            out.push_str("{{ ::forge::vite::render(&[");
+                            out.push_str(args_inner);
+                            out.push_str("])|safe }}");
+                        }
+                        LowerTarget::MiniJinja => {
+                            // MiniJinja can't parse the Rust `&[...]` slice nor the
+                            // `::forge::vite::render` path. Emit a function call to
+                            // a runtime helper that the spark Environment registers
+                            // in `build_env()` — accepts the array via MiniJinja's
+                            // native list literal syntax (which happens to be the
+                            // same comma-separated `"a", "b"` we already have).
+                            out.push_str("{{ vite_render([");
+                            out.push_str(args_inner);
+                            out.push_str("])|safe }}");
+                        }
+                    },
 
                     // ─── Auth / authorization ──────────────────────────────
                     "auth" => out.push_str("{% if auth_user.is_some() %}"),
