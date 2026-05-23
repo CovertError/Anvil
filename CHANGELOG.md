@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-05-22
+
+### Security (the only one in 0.3.x that's a real production blocker)
+
+- **#26: Proxy-supplied headers stripped from untrusted peers.** Adds an
+  `apply_layers` middleware that removes proxy-conventional headers
+  (`X-Forwarded-*`, `X-Real-IP`, `Forwarded`, `X-TLS-SPKI-SHA256`,
+  `X-Client-Cert`, `X-SSL-Client-*`) from any request whose direct TCP
+  peer isn't in `cfg.trusted_proxies.ranges`. Empty trusted list = strip
+  from every request (the safe default for direct-listen deployments).
+  Apps reading these headers can stop guarding against client-supplied
+  spoofs — the framework guarantees they came from a trusted hop.
+
+### Schema parity with Laravel
+
+- **#28: `foreign_id_for` action variants.** Added
+  `foreign_id_for_nullable` (`ON DELETE SET NULL` + nullable column),
+  `foreign_id_for_restrict` (`ON DELETE RESTRICT`), and
+  `foreign_id_for_no_action` (no ON DELETE clause at all). Matches
+  Laravel's `->nullOnDelete()` / `->restrictOnDelete()` / `->noActionOnDelete()`.
+- **#29: Composite primary keys.** `t.primary(&["user_id", "role_id"])`
+  inlines `PRIMARY KEY (user_id, role_id)` into the CREATE TABLE body
+  (portable across Postgres / MySQL / SQLite). Unblocks pivot tables
+  like `model_has_roles` / `model_has_permissions`.
+
+### Developer experience
+
+- **#27: `anvil routes` works from the scaffold.** Adds a `routes`
+  arm to the scaffolded `.anvil/main.rs` subcommand dispatcher that
+  calls `bootstrap::app::build` then prints the route table. Supports
+  `--json`, `--method=GET`, `--prefix=/api`. Previously returned
+  `unknown subcommand: routes`.
+- **#45: `TestClient::with_cookie_jar()`.** Persists `Set-Cookie`
+  across requests so multi-step flow tests (login → CSRF-protected POST,
+  session lifecycle) work without manual header juggling. Empty value
+  in `Set-Cookie` deletes (browser convention). `cookies()` accessor
+  returns the current jar contents for assertions. Off by default;
+  callers opt in explicitly.
+- **#46: `anvil make:*` refuses to run outside an Anvil project.**
+  `project_root` now walks up cwd looking for a `Cargo.toml` that
+  depends on `anvilforge`, exiting with a clear message if none is
+  found. Catches the "ran `make:controller Foo` from a Laravel root
+  by accident" footgun. Bypass with `ANVIL_SKIP_PROJECT_CHECK=1`.
+- **#47: Migration FK-ordering pre-flight check.**
+  `MigrationRunner::run_up` now scans each migration's CREATE TABLE
+  statements for `REFERENCES <table>` clauses; if `<table>` hasn't
+  been created yet (and doesn't already exist in the DB), errors with
+  a pointed message telling the user which migration to rename. Replaces
+  the cryptic Postgres `relation does not exist` error pointing at a
+  SQL fragment.
+
+### Documentation
+
+- **#30: Error JSON shape documented in `crates/anvil-core/src/error.rs`.**
+  The framework already emits Laravel's `{message, errors?}` shape
+  from `Error::into_response`; the module doc now spells this out
+  prominently with examples so apps stop hand-rolling
+  `(StatusCode, Json(json!({"error": "msg"})))` tuples that diverge.
+
 ## [0.3.8] - 2026-05-21
 
 ### Closes the three observations deferred from 0.3.7

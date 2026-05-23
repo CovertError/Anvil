@@ -112,6 +112,10 @@ pub struct Table {
     drops: Vec<String>,
     renames: Vec<(String, String)>,
     checks: Vec<PendingCheck>,
+    /// Composite-primary-key column list. Empty means "no composite PK"
+    /// — single-column PKs (via `t.id()`) are tracked on the column itself
+    /// and don't appear here.
+    primary_keys: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -194,6 +198,7 @@ impl Table {
             drops: Vec::new(),
             renames: Vec::new(),
             checks: Vec::new(),
+            primary_keys: Vec::new(),
         }
     }
 
@@ -208,6 +213,27 @@ impl Table {
     }
 
     // ── identifier ───────────────────────────────────────────────────────────
+
+    /// Declare a composite PRIMARY KEY across the named columns. Mirrors
+    /// Laravel's `$table->primary(['user_id', 'role_id'])`. Use this for
+    /// pivot tables like `model_has_roles` where the row identity is the
+    /// combination of foreign keys.
+    ///
+    /// Inlines `PRIMARY KEY (col1, col2)` into the CREATE TABLE body.
+    /// On Postgres/MySQL it would otherwise need
+    /// `ALTER TABLE … ADD CONSTRAINT … PRIMARY KEY (…)`; SQLite has no
+    /// such ALTER, so inline is the only portable form.
+    ///
+    /// Don't combine with `t.id()` on the same table — that creates a
+    /// single-column `id` primary key, and adding a composite one is a
+    /// conflict the database will reject.
+    pub fn primary(&mut self, columns: &[&str]) -> &mut Self {
+        if columns.is_empty() {
+            return self;
+        }
+        self.primary_keys = columns.iter().map(|c| (*c).to_string()).collect();
+        self
+    }
 
     pub fn id(&mut self) -> &mut ColumnDef {
         let cd = self.push_column("id", ColumnType::BigInteger);
@@ -467,14 +493,58 @@ impl Table {
     /// - `t.foreign_id_for("user_id", "users")` — most common pattern
     /// - `t.big_integer("user_id")` + `t.foreign("user_id").references("id").on("users")` — explicit
     pub fn foreign_id_for(&mut self, name: &str, references: &str) -> &mut ColumnDef {
+        self.foreign_id_for_with_action(name, references, "CASCADE", false)
+    }
+
+    /// Same as [`foreign_id_for`] but emits `ON DELETE SET NULL` and makes
+    /// the column nullable. Matches Laravel's
+    /// `$table->foreignId('user_id')->nullable()->constrained()->nullOnDelete()`.
+    pub fn foreign_id_for_nullable(&mut self, name: &str, references: &str) -> &mut ColumnDef {
+        self.foreign_id_for_with_action(name, references, "SET NULL", true)
+    }
+
+    /// Same as [`foreign_id_for`] but emits `ON DELETE RESTRICT`. Matches
+    /// `$table->foreignId('order_id')->constrained()->restrictOnDelete()`.
+    pub fn foreign_id_for_restrict(&mut self, name: &str, references: &str) -> &mut ColumnDef {
+        self.foreign_id_for_with_action(name, references, "RESTRICT", false)
+    }
+
+    /// Same as [`foreign_id_for`] but emits no `ON DELETE` clause at all —
+    /// the database's default (usually NO ACTION) applies. Use when you need
+    /// a foreign-key column without a tied cascade policy.
+    pub fn foreign_id_for_no_action(&mut self, name: &str, references: &str) -> &mut ColumnDef {
+        let cd = {
+            self.foreign_keys.push(PendingFk {
+                column: name.to_string(),
+                ref_table: references.to_string(),
+                ref_col: "id".to_string(),
+                on_delete: None,
+                on_update: None,
+            });
+            self.push_column(name, ColumnType::BigInteger)
+        };
+        cd
+    }
+
+    fn foreign_id_for_with_action(
+        &mut self,
+        name: &str,
+        references: &str,
+        on_delete: &str,
+        nullable: bool,
+    ) -> &mut ColumnDef {
         self.foreign_keys.push(PendingFk {
             column: name.to_string(),
             ref_table: references.to_string(),
             ref_col: "id".to_string(),
-            on_delete: Some("CASCADE".to_string()),
+            on_delete: Some(on_delete.to_string()),
             on_update: None,
         });
-        self.push_column(name, ColumnType::BigInteger)
+        let cd = self.push_column(name, ColumnType::BigInteger);
+        if nullable {
+            cd.nullable();
+        }
+        cd
     }
 
     /// Begin a fluent foreign-key constraint builder for `column`.
@@ -576,10 +646,14 @@ impl Table {
                 }
                 let mut sql = build_per_driver(&t, self.driver);
 
-                // Inline FK + CHECK constraints inside the CREATE TABLE body.
-                // SQLite has no `ALTER TABLE … ADD CONSTRAINT`, so emitting them
-                // post-create only works on Postgres/MySQL; inline is portable.
+                // Inline FK + CHECK constraints + composite PK inside the
+                // CREATE TABLE body. SQLite has no `ALTER TABLE … ADD
+                // CONSTRAINT`, so emitting them post-create only works on
+                // Postgres/MySQL; inline is portable.
                 let mut inline = Vec::new();
+                if !self.primary_keys.is_empty() {
+                    inline.push(format!("PRIMARY KEY ({})", self.primary_keys.join(", ")));
+                }
                 for fk in &self.foreign_keys {
                     inline.push(fk.inline_clause(&self.name));
                 }

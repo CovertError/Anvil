@@ -1026,6 +1026,7 @@ async fn main() -> Result<()> {{
 
     match subcommand {{
         "serve" => serve().await,
+        "routes" => run_routes(&args[2..]).await,
         "migrate" => run_migrate(&args[2..]).await,
         "migrate:rollback" => run_migrate_rollback(&args[2..]).await,
         "migrate:reset" => run_migrate_reset().await,
@@ -1042,6 +1043,54 @@ async fn main() -> Result<()> {{
             std::process::exit(2);
         }}
     }}
+}}
+
+/// `anvil routes` — list every registered route. Supports `--json`,
+/// `--method=<M>`, `--prefix=<P>` filters matching the CLI flags.
+async fn run_routes(args: &[String]) -> Result<()> {{
+    let container = build_container().await?;
+    let app = bootstrap::app::build(container).await?;
+
+    let json = has_flag(args, "--json");
+    let method_filter = args.iter().position(|a| a == "--method")
+        .and_then(|i| args.get(i + 1).cloned())
+        .map(|s| s.to_ascii_uppercase());
+    let prefix_filter = args.iter().position(|a| a == "--prefix")
+        .and_then(|i| args.get(i + 1).cloned());
+
+    let routes: Vec<&anvilforge::route::RouteInfo> = app.routes()
+        .iter()
+        .filter(|r| match &method_filter {{
+            Some(m) => r.method.as_str().eq_ignore_ascii_case(m),
+            None => true,
+        }})
+        .filter(|r| match &prefix_filter {{
+            Some(p) => r.path.starts_with(p.as_str()),
+            None => true,
+        }})
+        .collect();
+
+    if json {{
+        let out: Vec<_> = routes.iter().map(|r| serde_json::json!({{
+            "method": r.method.as_str(),
+            "path": r.path,
+            "middleware": r.middleware,
+        }})).collect();
+        println!("{{}}", serde_json::to_string_pretty(&out)?);
+    }} else {{
+        println!("{{:<8}}  {{}}", "METHOD", "PATH");
+        println!("{{:-<8}}  {{:-<60}}", "", "");
+        for r in &routes {{
+            println!("{{:<8}}  {{}}", r.method.as_str(), r.path);
+        }}
+        if routes.is_empty() {{
+            println!("(no routes match filters)");
+        }} else {{
+            println!();
+            println!("{{}} route(s)", routes.len());
+        }}
+    }}
+    Ok(())
 }}
 
 async fn build_pool() -> Result<anvilforge::cast::Pool> {{

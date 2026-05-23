@@ -274,7 +274,71 @@ pub fn apply_layers(web: AxumRouter<Container>, cfg: &ServerConfig) -> AxumRoute
     // building block of trace correlation across services.
     router = router.layer(axum::middleware::from_fn(request_id_mw));
 
+    // Trusted-proxy header strip — added LAST so it wraps everything else as
+    // the OUTERMOST layer (axum: last .layer() runs first on a request).
+    // Removes proxy-supplied security-sensitive headers from any request
+    // whose direct TCP peer ISN'T in `cfg.trusted_proxies.ranges`. Empty
+    // trusted-list = direct-listen mode, headers stripped from every request.
+    //
+    // Application code can then read `X-Forwarded-Proto`, `X-Real-IP`,
+    // `X-TLS-SPKI-SHA256`, etc. without worrying that a hostile client at
+    // the edge spoofed them.
+    let trusted_for_strip = trusted.clone();
+    router = router.layer(axum::middleware::from_fn(
+        move |req: Request<Body>, next: Next| {
+            let trusted = trusted_for_strip.clone();
+            async move { strip_untrusted_headers_mw(trusted, req, next).await }
+        },
+    ));
+
     router
+}
+
+/// Headers conventionally set by reverse proxies on behalf of the client.
+/// Stripped from any request whose direct TCP peer isn't in
+/// `cfg.trusted_proxies.ranges` (empty list = strip from everyone). This
+/// covers the standard set plus Anvil-specific paired-device TLS fingerprint.
+///
+/// Apps that legitimately accept these from end clients (rare) should add
+/// `127.0.0.1/32` or the client's IP range to `[trusted_proxies] ranges`.
+const SENSITIVE_PROXY_HEADERS: &[&str] = &[
+    "x-forwarded-for",
+    "x-forwarded-proto",
+    "x-forwarded-host",
+    "x-forwarded-port",
+    "x-forwarded-prefix",
+    "x-real-ip",
+    "forwarded",
+    "x-tls-spki-sha256",
+    "x-client-cert",
+    "x-ssl-client-cert",
+    "x-ssl-client-verify",
+    "x-ssl-client-s-dn",
+];
+
+async fn strip_untrusted_headers_mw(
+    trusted: Arc<Vec<ipnet::IpNet>>,
+    mut req: Request<Body>,
+    next: Next,
+) -> Response<Body> {
+    let peer: Option<std::net::IpAddr> = req
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ci| ci.0.ip());
+
+    let peer_trusted = match peer {
+        Some(addr) => !trusted.is_empty() && trusted.iter().any(|net| net.contains(&addr)),
+        None => false,
+    };
+
+    if !peer_trusted {
+        let headers = req.headers_mut();
+        for &name in SENSITIVE_PROXY_HEADERS {
+            headers.remove(name);
+        }
+    }
+
+    next.run(req).await
 }
 
 fn mount_static(

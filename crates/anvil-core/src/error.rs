@@ -1,4 +1,45 @@
 //! Unified error type for Anvil. Implements `IntoResponse` so handlers `?`-propagate freely.
+//!
+//! ## JSON shape
+//!
+//! `Error::into_response` always serializes to **Laravel's standard JSON
+//! shape** so a Laravel-trained frontend can consume Anvil errors without
+//! changes:
+//!
+//! ```jsonc
+//! // Validation errors (HTTP 422):
+//! {
+//!   "message": "The given data was invalid.",
+//!   "errors": {
+//!     "email": ["The email must be a valid email address."],
+//!     "password": ["The password must be at least 8 characters."]
+//!   }
+//! }
+//!
+//! // Everything else (HTTP 401 / 403 / 404 / 409 / 500 / …):
+//! {
+//!   "message": "forbidden: this resource belongs to another user"
+//! }
+//! ```
+//!
+//! Don't hand-build `(StatusCode, Json(json!({"error": "msg"})))` tuples —
+//! that produces a different shape than the framework's `?` propagation,
+//! and a Laravel-shaped client choking on the inconsistency will be your
+//! first regression. Use the `Error::*` variants:
+//!
+//! ```ignore
+//! return Err(Error::Forbidden("not yours".into()));      // {"message": "forbidden: not yours"}
+//! return Err(Error::NotFound);                            // {"message": "not found"}
+//! return Err(Error::bad_request("missing parameter"));    // {"message": "bad request: missing parameter"}
+//! ```
+//!
+//! For ad-hoc validation errors outside a `FormRequest`:
+//!
+//! ```ignore
+//! let mut errs = ValidationErrors::new();
+//! errs.add("email", "email already in use");
+//! return Err(Error::Validation(errs));   // → 422, {"message": ..., "errors": {...}}
+//! ```
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};

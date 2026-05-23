@@ -5,6 +5,7 @@
 //! returns `&Self` so you can stack them.
 
 use std::convert::Infallible;
+use std::sync::{Arc, Mutex};
 
 use anvil_core::Application;
 use axum::body::{Body, Bytes};
@@ -14,9 +15,21 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 
+/// Shared (name, value) cookie jar — `Arc<Mutex<_>>` so a `&self` request
+/// can mutate the jar while the cookies-snapshot accessor reads it.
+type CookieJar = Arc<Mutex<Vec<(String, String)>>>;
+
 pub struct TestClient {
     router: Router,
     base_headers: HeaderMap,
+    /// Cookie jar. `None` (the default) means no cookie handling — every
+    /// request is independent, like the original behavior. Calling
+    /// [`with_cookie_jar`] opts into persisting Set-Cookie across requests
+    /// so multi-step flows (login → CSRF-protected POST, session lifecycle,
+    /// etc.) work without manual header juggling.
+    ///
+    /// [`with_cookie_jar`]: TestClient::with_cookie_jar
+    cookies: Option<CookieJar>,
 }
 
 impl TestClient {
@@ -30,6 +43,7 @@ impl TestClient {
         Self {
             router: app.into_router(),
             base_headers: HeaderMap::new(),
+            cookies: None,
         }
     }
 
@@ -38,6 +52,47 @@ impl TestClient {
         Self {
             router,
             base_headers: HeaderMap::new(),
+            cookies: None,
+        }
+    }
+
+    /// Turn on cookie persistence: `Set-Cookie` headers from each response are
+    /// stashed and replayed on subsequent requests as a `Cookie:` header.
+    /// Enables happy-path multi-step flow testing (login form → CSRF-protected
+    /// POST, session lifecycle, etc.) without per-test header juggling.
+    ///
+    /// ```ignore
+    /// let client = TestClient::new(app).await.with_cookie_jar();
+    /// client.post_form("/login", &[("email", "a@b.com"), ("password", "...")]).await
+    ///     .assert_redirect_to("/dashboard");
+    /// client.get("/dashboard").await.assert_ok();  // session cookie carried through
+    /// ```
+    ///
+    /// Cookie semantics are simplified: name/value pairs only — no
+    /// `Path` / `Domain` / `Expires` / `Max-Age` honoring (tests run in
+    /// sub-second windows where TTL doesn't matter; everything's same-host
+    /// since it's all in-process). An empty value clears the cookie, matching
+    /// the browser convention for `Set-Cookie: name=; Max-Age=0`.
+    pub fn with_cookie_jar(mut self) -> Self {
+        self.cookies = Some(Arc::new(Mutex::new(Vec::new())));
+        self
+    }
+
+    /// Snapshot of the cookie jar's current contents. Useful for assertions
+    /// like `assert!(client.cookies().iter().any(|(n, _)| n == "session_id"))`.
+    /// Returns an empty Vec if cookie persistence wasn't enabled.
+    pub fn cookies(&self) -> Vec<(String, String)> {
+        self.cookies
+            .as_ref()
+            .map(|jar| jar.lock().unwrap().clone())
+            .unwrap_or_default()
+    }
+
+    /// Wipe the cookie jar mid-test (e.g. to simulate a fresh browser
+    /// session). No-op if cookie persistence wasn't enabled.
+    pub fn clear_cookies(&self) {
+        if let Some(jar) = &self.cookies {
+            jar.lock().unwrap().clear();
         }
     }
 
@@ -177,7 +232,46 @@ impl TestClient {
                 .entry(name.clone())
                 .or_insert_with(|| value.clone());
         }
+        // Inject the cookie jar contents as a single `Cookie:` header. We
+        // overwrite any caller-supplied `Cookie:` header — multi-step flows
+        // want the jar to be authoritative.
+        if let Some(jar) = &self.cookies {
+            let cookies = jar.lock().unwrap();
+            if !cookies.is_empty() {
+                let joined = cookies
+                    .iter()
+                    .map(|(n, v)| format!("{n}={v}"))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                if let Ok(val) = http::HeaderValue::from_str(&joined) {
+                    req.headers_mut().insert("cookie", val);
+                }
+            }
+        }
+
         let response = self.router.clone().oneshot(req).await.unwrap();
+
+        // Update the jar from `Set-Cookie`. Multiple `Set-Cookie` headers can
+        // appear in a single response — handle each.
+        if let Some(jar) = &self.cookies {
+            let mut cookies = jar.lock().unwrap();
+            for raw in response.headers().get_all("set-cookie").iter() {
+                let Ok(s) = raw.to_str() else { continue };
+                // Just the name=value pair — attribute spec (Path, Domain, etc.)
+                // is ignored for simplicity.
+                let pair = s.split(';').next().unwrap_or(s);
+                let Some((name, value)) = pair.split_once('=') else {
+                    continue;
+                };
+                let name = name.trim().to_string();
+                let value = value.trim().to_string();
+                // Empty value is the browser-deletion convention.
+                cookies.retain(|(n, _)| n != &name);
+                if !value.is_empty() {
+                    cookies.push((name, value));
+                }
+            }
+        }
 
         let status = response.status();
         let headers = response.headers().clone();
@@ -557,5 +651,115 @@ mod tests {
             .await;
         resp.assert_ok();
         assert_eq!(resp.body_text(), "PATCH");
+    }
+
+    #[tokio::test]
+    async fn cookie_jar_persists_set_cookie_across_requests() {
+        use axum::http::HeaderMap;
+        use axum::response::Response;
+        use axum::routing::get;
+
+        async fn set_cookie() -> Response {
+            Response::builder()
+                .status(200)
+                .header("set-cookie", "session_id=abc123; Path=/")
+                .body(axum::body::Body::from("set"))
+                .unwrap()
+        }
+
+        async fn read_cookie(headers: HeaderMap) -> String {
+            headers
+                .get("cookie")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("(none)")
+                .to_string()
+        }
+
+        let router = Router::new()
+            .route("/login", get(set_cookie))
+            .route("/me", get(read_cookie));
+        let client = TestClient::from_router(router).with_cookie_jar();
+
+        let r1 = client.get("/login").await;
+        r1.assert_ok();
+
+        let r2 = client.get("/me").await;
+        r2.assert_ok();
+        assert_eq!(r2.body_text(), "session_id=abc123");
+
+        // Jar accessor exposes the stored pair.
+        let snap = client.cookies();
+        assert_eq!(snap, vec![("session_id".to_string(), "abc123".to_string())]);
+    }
+
+    #[tokio::test]
+    async fn cookie_jar_replaces_same_name_and_deletes_on_empty_value() {
+        use axum::response::Response;
+        use axum::routing::get;
+
+        async fn rotate() -> Response {
+            Response::builder()
+                .status(200)
+                .header("set-cookie", "session_id=v2")
+                .body(axum::body::Body::from(""))
+                .unwrap()
+        }
+
+        async fn delete() -> Response {
+            Response::builder()
+                .status(200)
+                .header("set-cookie", "session_id=; Max-Age=0")
+                .body(axum::body::Body::from(""))
+                .unwrap()
+        }
+
+        let router = Router::new()
+            .route("/rotate", get(rotate))
+            .route("/logout", get(delete));
+        let client = TestClient::from_router(router).with_cookie_jar();
+
+        client.get("/rotate").await.assert_ok();
+        assert_eq!(client.cookies(), vec![("session_id".into(), "v2".into())]);
+
+        // Rotation: same name, new value → existing entry replaced, not duplicated.
+        client.get("/rotate").await.assert_ok();
+        assert_eq!(client.cookies(), vec![("session_id".into(), "v2".into())]);
+
+        // Empty value = delete (browser convention for cookie expiration).
+        client.get("/logout").await.assert_ok();
+        assert!(client.cookies().is_empty());
+    }
+
+    #[tokio::test]
+    async fn cookie_jar_off_by_default_does_not_carry_state() {
+        use axum::http::HeaderMap;
+        use axum::response::Response;
+        use axum::routing::get;
+
+        async fn set_cookie() -> Response {
+            Response::builder()
+                .status(200)
+                .header("set-cookie", "x=1")
+                .body(axum::body::Body::from(""))
+                .unwrap()
+        }
+        async fn read_cookie(headers: HeaderMap) -> String {
+            headers
+                .get("cookie")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("(none)")
+                .to_string()
+        }
+
+        let router = Router::new()
+            .route("/set", get(set_cookie))
+            .route("/read", get(read_cookie));
+        let client = TestClient::from_router(router); // no .with_cookie_jar()
+
+        client.get("/set").await.assert_ok();
+        let r2 = client.get("/read").await;
+        // Without the jar, the second request should NOT carry the cookie.
+        assert_eq!(r2.body_text(), "(none)");
+        assert!(client.cookies().is_empty());
     }
 }

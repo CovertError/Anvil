@@ -360,6 +360,10 @@ impl MigrationRunner {
         self.ensure_table().await?;
         let already = self.applied().await?;
         let batch = self.next_batch().await?;
+        // Seed the FK-ordering check with tables that already exist in the DB,
+        // so already-applied-in-prior-batch tables don't false-positive.
+        let mut known_tables: std::collections::HashSet<String> =
+            self.list_user_tables().await?.into_iter().collect();
         let mut applied = Vec::new();
         for m in &self.migrations {
             if already.iter().any(|a| a == m.name()) {
@@ -367,12 +371,44 @@ impl MigrationRunner {
             }
             let mut schema = Schema::for_driver(self.driver());
             m.up(&mut schema);
+            check_fk_ordering(m.name(), &schema.statements, &mut known_tables)?;
             self.exec_many(&schema.statements).await?;
             self.record_applied(m.name(), batch).await?;
             applied.push(m.name().to_string());
             tracing::info!(name = m.name(), "migration applied");
         }
         Ok(applied)
+    }
+
+    /// List every user table in the default schema. Used by [`run_up`] to
+    /// seed the FK-ordering pre-flight check.
+    async fn list_user_tables(&self) -> Result<Vec<String>, Error> {
+        Ok(match &self.pool {
+            Pool::Postgres(p) => sqlx::query_as::<_, (String,)>(
+                "SELECT tablename FROM pg_tables WHERE schemaname = 'public'",
+            )
+            .fetch_all(p)
+            .await?
+            .into_iter()
+            .map(|(t,)| t)
+            .collect(),
+            Pool::MySql(p) => sqlx::query_as::<_, (String,)>(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE()",
+            )
+            .fetch_all(p)
+            .await?
+            .into_iter()
+            .map(|(t,)| t)
+            .collect(),
+            Pool::Sqlite(p) => sqlx::query_as::<_, (String,)>(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+            )
+            .fetch_all(p)
+            .await?
+            .into_iter()
+            .map(|(t,)| t)
+            .collect(),
+        })
     }
 
     pub async fn rollback(&self) -> Result<Vec<String>, Error> {
@@ -559,6 +595,110 @@ pub struct MigrationStatus {
     pub name: String,
     pub applied: bool,
     pub batch: Option<i32>,
+}
+
+/// Pre-flight check: a CREATE TABLE in this migration must not reference a
+/// table that hasn't been created yet (in this batch or a prior one). The
+/// alphabetic-by-filename ordering makes this easy to violate accidentally —
+/// e.g. `create_block_submissions_table` sorts before `create_blocks_table`
+/// but FK-references `blocks`.
+///
+/// On failure we return an `Error::Internal` whose message tells the user
+/// exactly which migration to rename and which file to bump. The actual
+/// Postgres error ("relation does not exist") is cryptic-shaped and points
+/// at the SQL fragment, not the migration file.
+fn check_fk_ordering(
+    migration_name: &str,
+    statements: &[String],
+    known_tables: &mut std::collections::HashSet<String>,
+) -> Result<(), Error> {
+    for stmt in statements {
+        let Some(table) = parse_create_table_name(stmt) else {
+            continue;
+        };
+        for ref_table in parse_fk_references(stmt) {
+            // The table can reference itself (e.g. tree-shaped data).
+            if ref_table == table {
+                continue;
+            }
+            if !known_tables.contains(&ref_table) {
+                return Err(Error::Internal(format!(
+                    "migration `{migration_name}` creates table `{table}` with a \
+                     foreign key referencing `{ref_table}`, but `{ref_table}` \
+                     hasn't been created yet.\n\n\
+                     Migrations apply in alphabetical-by-filename order — bump \
+                     the filename timestamp of the migration that creates \
+                     `{ref_table}` so it sorts BEFORE `{migration_name}`."
+                )));
+            }
+        }
+        known_tables.insert(table);
+    }
+    Ok(())
+}
+
+/// Extract `T` from `CREATE TABLE [IF NOT EXISTS] "T" (...)`. Returns `None`
+/// for non-CREATE statements (CREATE INDEX, ALTER TABLE, etc.).
+fn parse_create_table_name(stmt: &str) -> Option<String> {
+    let trimmed = stmt.trim_start();
+    let upper = trimmed.to_ascii_uppercase();
+    let prefix_len = if upper.starts_with("CREATE TABLE IF NOT EXISTS ") {
+        "CREATE TABLE IF NOT EXISTS ".len()
+    } else if upper.starts_with("CREATE TABLE ") {
+        "CREATE TABLE ".len()
+    } else {
+        return None;
+    };
+    let rest = &trimmed[prefix_len..];
+    Some(parse_identifier(rest)?.0)
+}
+
+/// Find every `REFERENCES <table>` in `stmt` and return the table names.
+fn parse_fk_references(stmt: &str) -> Vec<String> {
+    let mut refs = Vec::new();
+    let upper = stmt.to_ascii_uppercase();
+    let mut cursor = 0;
+    while let Some(idx) = upper[cursor..].find("REFERENCES ") {
+        let abs = cursor + idx + "REFERENCES ".len();
+        let rest = &stmt[abs..];
+        if let Some((name, consumed)) = parse_identifier(rest) {
+            refs.push(name);
+            cursor = abs + consumed;
+        } else {
+            break;
+        }
+    }
+    refs
+}
+
+/// Parse one quoted-or-bare identifier off the front of `s`. Returns the
+/// identifier text and the number of source bytes consumed (including any
+/// surrounding quotes).
+fn parse_identifier(s: &str) -> Option<(String, usize)> {
+    let bytes = s.as_bytes();
+    if bytes.is_empty() {
+        return None;
+    }
+    let (quote, body_start) = match bytes[0] {
+        b'"' => (Some(b'"'), 1),
+        b'`' => (Some(b'`'), 1),
+        _ => (None, 0),
+    };
+    let body = &s[body_start..];
+    let end_in_body = match quote {
+        Some(q) => body.bytes().position(|b| b == q)?,
+        None => body
+            .bytes()
+            .position(|b| matches!(b, b' ' | b'\t' | b'\n' | b'\r' | b'(' | b',' | b')'))
+            .unwrap_or(body.len()),
+    };
+    let name = body[..end_in_body].to_string();
+    let consumed = body_start + end_in_body + quote.map(|_| 1).unwrap_or(0);
+    if name.is_empty() {
+        None
+    } else {
+        Some((name, consumed))
+    }
 }
 
 #[cfg(test)]
