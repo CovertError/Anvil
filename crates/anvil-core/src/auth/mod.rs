@@ -1,4 +1,12 @@
 //! Auth: sessions, guards, policies. Argon2-backed.
+//!
+//! ## Submodules
+//!
+//! - [`totp`] — RFC 6238 time-based one-time passwords (second-factor auth).
+//! - [`recovery`] — single-use recovery codes for TOTP fallback.
+
+pub mod recovery;
+pub mod totp;
 
 use std::marker::PhantomData;
 use std::sync::Arc;

@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.10] - 2026-05-22
+
+### `anvilforge::auth::totp` + `anvilforge::auth::recovery`
+
+Pre-empts the only remaining blocked slice on the Sidevers port (G.11
+recovery codes) — and unblocks any future port that needs Fortify's
+two-factor stack without rolling its own.
+
+**`auth::totp`** — RFC 6238 time-based one-time passwords. Thin wrapper
+over the `totp-rs` crate, shaped to Anvilforge's surface:
+
+```rust
+use anvilforge::auth::totp;
+
+// Enrollment: stash on the user, render the URI as a QR.
+let secret = totp::Secret::generate();
+let uri = totp::provisioning_uri(&secret, "My App", "alice@example.com");
+// `secret.as_base32()` → user_two_factor_secrets row.
+
+// Verify on login (post-password):
+if totp::verify(&secret, user_supplied_code) {
+    // session: ok
+}
+```
+
+Defaults match Google Authenticator / Authy / GitHub / GitLab / Stripe:
+SHA-1, 6 digits, 30-second step, ±1 step skew (±30 s clock drift). 20-byte
+secrets per RFC 4226. `verify_with_skew` available for unusual deployments
+but the default is the right default.
+
+**`auth::recovery`** — single-use recovery codes for "I lost my phone":
+
+```rust
+use anvilforge::auth::recovery;
+
+// At TOTP enrollment, generate N codes — show ONCE, store hashes.
+let codes = recovery::generate(8);
+show_to_user_once(&codes);
+let hashes = recovery::hash_all(&codes)?;
+save_to_db(user_id, &hashes);
+
+// On recovery login:
+match recovery::verify_and_consume(provided_code, &stored_hashes)? {
+    Some(consumed_hash) => {
+        delete_hash_from_db(user_id, &consumed_hash);  // single-use
+        // session: ok
+    }
+    None => return Err(Error::Unauthenticated),
+}
+```
+
+Codes are 10 characters from a 32-char alphabet (`23456789abcdefghjkmnpqrstuvwxyz`
+— digits + a-z minus visually-ambiguous `01ilo`), grouped `XXXXX-XXXXX`
+for readable transcription. ~50 bits of entropy per code. Argon2id hashes
+under the hood — same primitive `auth::hash_password` already uses.
+Normalizes case, whitespace, and hyphens on verify so users can re-type
+loosely.
+
+13 tests cover both modules — secret round-trip, URI shape, verify
+accepts current / rejects wrong / rejects malformed code; code shape,
+hash-and-verify round-trip, normalization, single-use semantics,
+empty-input handling.
+
 ## [0.3.9] - 2026-05-22
 
 ### Security (the only one in 0.3.x that's a real production blocker)

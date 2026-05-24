@@ -152,7 +152,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anvilforge-bellows",
  "anvilforge-boost",
@@ -176,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-bellows"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "async-trait",
  "axum",
@@ -198,7 +198,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-boost"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anvilforge-cast-core",
  "anvilforge-core",
@@ -223,7 +223,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-cast"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anvilforge-cast-core",
  "anvilforge-cast-derive",
@@ -233,7 +233,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-cast-core"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "async-trait",
  "chrono",
@@ -254,7 +254,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-cast-derive"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -264,7 +264,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-cli"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "base64",
@@ -293,7 +293,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-core"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anvilforge-cast-core",
  "anvilforge-templates",
@@ -343,6 +343,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "toml",
+ "totp-rs",
  "tower",
  "tower-http 0.5.2",
  "tower-sessions",
@@ -355,7 +356,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-derive"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -365,7 +366,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-dev"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anvilforge-core",
  "axum",
@@ -383,7 +384,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-http-bench"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anvilforge-cast-core",
  "anvilforge-core",
@@ -406,7 +407,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-spark"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "aes-gcm",
  "anvilforge-bellows",
@@ -446,7 +447,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-spark-derive"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -456,7 +457,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-templates"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "askama",
  "indexmap",
@@ -471,7 +472,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-templates-codegen"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "chumsky",
  "indexmap",
@@ -482,7 +483,7 @@ dependencies = [
 
 [[package]]
 name = "anvilforge-test"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anvilforge-core",
  "async-trait",
@@ -809,6 +810,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "base32"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "022dfe9eb35f19ebbcb51e0b40a5ab759f46ad60cadf7297e0bd085afb50e076"
+
+[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -864,7 +871,7 @@ dependencies = [
 
 [[package]]
 name = "blog"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anvilforge",
  "anvilforge-boost",
@@ -1238,6 +1245,12 @@ name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
+
+[[package]]
+name = "constant_time_eq"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c74b8349d32d297c9134b8c88677813a227df8f779daa29bfc29c183fe3dca6"
 
 [[package]]
 name = "cookie"
@@ -2229,7 +2242,7 @@ dependencies = [
 
 [[package]]
 name = "hot-demo"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "axum",
  "hot-demo-handlers",
@@ -2243,7 +2256,7 @@ dependencies = [
 
 [[package]]
 name = "hot-demo-handlers"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "serde",
  "serde_json",
@@ -4917,6 +4930,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
+name = "totp-rs"
+version = "5.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2b36a9dd327e9f401320a2cb4572cc76ff43742bcfc3291f871691050f140ba"
+dependencies = [
+ "base32",
+ "constant_time_eq",
+ "hmac",
+ "rand 0.9.4",
+ "sha1",
+ "sha2",
+ "url",
+ "urlencoding",
+]
+
+[[package]]
 name = "tower"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5299,6 +5328,12 @@ dependencies = [
  "percent-encoding",
  "serde",
 ]
+
+[[package]]
+name = "urlencoding"
+version = "2.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
 
 [[package]]
 name = "utf-8"
